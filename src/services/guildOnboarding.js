@@ -5,6 +5,7 @@ const {
   EmbedBuilder,
   PermissionFlagsBits,
 } = require('discord.js');
+const logger = require('./logger').logger.child({ component: 'guild-onboarding' });
 
 const DEFAULT_PANEL_URL = 'https://fyxbot-panel-production.up.railway.app/';
 
@@ -67,7 +68,7 @@ async function sendGuildOnboarding(guild) {
     await channel.send(onboardingPayload(guild.name));
     return { sent: true, channelId: channel.id };
   } catch (error) {
-    console.warn(`[FyxBot] Message d’arrivée impossible sur ${guild.id} : ${error.message}`);
+    logger.warn({ err: error, guildId: guild.id }, '[FyxBot] Message d’arrivée impossible.');
     return { sent: false, reason: 'send-failed' };
   }
 }

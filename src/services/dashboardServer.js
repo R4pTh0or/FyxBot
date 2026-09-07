@@ -1,14 +1,28 @@
 const http = require('node:http');
 const { createHash, randomUUID } = require('node:crypto');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, EmbedBuilder, PermissionFlagsBits } = require('discord.js');
+const logger = require('./logger').logger.child({ component: 'dashboard-api' });
 const { getLogConfig, setLogConfig } = require('../database/logStore');
 const { getTicketConfig, setTicketConfig } = require('../database/ticketStore');
 const { getSuggestionConfig, setSuggestionConfig } = require('../database/suggestionStore');
 const { getWelcomeConfig, setWelcomeConfig } = require('../database/welcomeStore');
-const { getServerSetupBlueprint, saveServerSetupDraft } = require('../database/serverSetupStore');
+const {
+  deleteServerSetupPreview,
+  getServerSetupBlueprint,
+  saveServerSetupDraft,
+} = require('../database/serverSetupStore');
 const { buildAdaptiveBlueprint } = require('./adaptiveServerBlueprint');
-const { backupServer } = require('./serverBackup');
+const { backupServer, restoreServer } = require('./serverBackup');
 const { analyzeServerStructure, resetServer, setupServer } = require('./serverSetup');
+const { buildSetupSimulation } = require('./setupSimulation');
+const { buildContentLibrary } = require('./contentLibrary');
+const {
+  archiveContent,
+  contentTrashSummary,
+  getContentTrashItem,
+  listContentTrash,
+  removeContentTrashItem,
+} = require('../database/contentTrashStore');
 const {
   csrfTokenMatches,
   finishLogin,
@@ -23,24 +37,37 @@ const { logAction } = require('./logs');
 const { LEGACY_RULE_PREFIX, RULE_PREFIX, ruleDefinitions } = require('../commands/configuration/securite');
 const { createPanelComponents, isTicketTopic } = require('./tickets');
 const { getRecentAuditLogs } = require('../database/auditLogStore');
+const {
+  getChange,
+  listChanges,
+  markChangeRolledBack,
+  recordChange,
+} = require('../database/changeHistoryStore');
 const { getRolePanelConfig, setRolePanelConfig } = require('../database/rolePanelStore');
 const { ROLE_BUTTON_PREFIX } = require('./roleButtons');
 const { getRecentSuggestions, getSuggestion, reviewSuggestion } = require('../database/suggestionRecordStore');
 const { getCreatorStats } = require('../database/creatorStatsStore');
 const { recordActivationProgress } = require('../database/activationStore');
-const { getRulesConfig } = require('../database/rulesStore');
+const { getRulesConfig, setRulesConfig } = require('../database/rulesStore');
 const { getBirthdayConfig, setBirthdayConfig } = require('../database/birthdayStore');
 const { getSocialConfig, setSocialConfig } = require('../database/socialStore');
 const { getTemporaryVoiceConfig } = require('../database/temporaryVoiceStore');
 const { publishRules, updateRulesMessage } = require('./rules');
 const { SUPPORTED_TIMEZONES } = require('./birthdays');
 const { socialNotificationPayload } = require('./socialNotifications');
-const { normalizeSocialSource } = require('./socialAutomation');
+const { normalizeSocialSource, replaceSocialSource } = require('./socialAutomation');
 const { buildOnboardingProgress } = require('./onboardingProgress');
 const { assertPremiumLimit, getGuildPremiumState } = require('./premiumPlans');
 const { claimFounderAccess } = require('./premiumFounderAccess');
 const { setupTemporaryVoice } = require('./temporaryVoice');
-const { customMessagePayload } = require('./customMessages');
+const { publicMessagePayload } = require('./customMessages');
+const {
+  createPublishedMessage,
+  deletePublishedMessage,
+  getPublishedMessage,
+  listPublishedMessages,
+  updatePublishedMessage,
+} = require('../database/publishedMessageStore');
 const { createCommunityEvent } = require('./communityEvents');
 const { createCommunityGiveaway, listGuildGiveaways } = require('./communityGiveaways');
 const { currentRelease } = require('./releaseManifest');
@@ -135,6 +162,80 @@ function messagePublishError(error) {
   return new HttpError(502, 'Discord n’a pas pu publier le message pour le moment. Réessayez dans quelques instants.');
 }
 
+function contentDeleteError(error) {
+  if (error instanceof HttpError) return error;
+  const code = Number(error?.code);
+  if (code === 50001) {
+    return new HttpError(403, 'FyxBot ne peut pas voir le salon contenant ce message. Autorisez-lui la permission « Voir le salon » puis réessayez.');
+  }
+  if (code === 50013) {
+    return new HttpError(403, 'FyxBot n’est pas autorisé à supprimer ce message. Autorisez-lui la permission « Gérer les messages » dans ce salon puis réessayez.');
+  }
+  return new HttpError(502, 'Discord n’a pas pu retirer ce contenu pour le moment. Réessayez dans quelques instants.');
+}
+
+function normalizeBotNickname(value) {
+  const nickname = String(value || '')
+    .replace(/[\u0000-\u001f\u007f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (Array.from(nickname).length > 32) {
+    throw new HttpError(400, 'Le surnom du bot ne peut pas dépasser 32 caractères.');
+  }
+  return nickname;
+}
+
+async function updateGuildBotNickname(guild, nickname, reason = 'Personnalisation FyxBot depuis le panel') {
+  const member = guild.members.me || await guild.members.fetchMe().catch(() => null);
+  if (!member) throw new HttpError(503, 'FyxBot ne retrouve pas son profil sur ce serveur. Réessayez dans quelques instants.');
+  if (!member.permissions.has(PermissionFlagsBits.ChangeNickname)) {
+    throw new HttpError(403, 'FyxBot ne possède pas la permission « Changer de pseudo » sur ce serveur.');
+  }
+  const desired = normalizeBotNickname(nickname);
+  const current = member.nickname || '';
+  if (current === desired) return { changed: false, nickname: desired || null };
+  try {
+    await member.setNickname(desired || null, reason);
+  } catch (error) {
+    if (Number(error?.code) === 50013) {
+      throw new HttpError(403, 'Discord refuse ce changement. Vérifiez la permission « Changer de pseudo » et la hiérarchie du rôle FyxBot.');
+    }
+    throw new HttpError(502, 'Discord n’a pas pu modifier le surnom de FyxBot pour le moment.');
+  }
+  return { changed: true, nickname: desired || null };
+}
+
+async function deleteTrackedDiscordMessage(client, guildId, channelId, messageId) {
+  if (!channelId || !messageId) return false;
+  let channel;
+  try {
+    channel = await client.channels.fetch(channelId);
+  } catch (error) {
+    if (Number(error?.code) === 10003) return false;
+    throw contentDeleteError(error);
+  }
+  if (!channel?.isTextBased() || channel.guildId !== guildId) {
+    throw new HttpError(409, 'Le salon associé à ce contenu ne correspond plus au serveur sélectionné.');
+  }
+  let message;
+  try {
+    message = await channel.messages.fetch(messageId);
+  } catch (error) {
+    if (Number(error?.code) === 10008) return false;
+    throw contentDeleteError(error);
+  }
+  if (!message) return false;
+  if (message.author?.id !== client.user?.id) {
+    throw new HttpError(409, 'FyxBot refuse de supprimer un message dont il n’est pas l’auteur.');
+  }
+  try {
+    await message.delete();
+  } catch (error) {
+    throw contentDeleteError(error);
+  }
+  return true;
+}
+
 function isLoopbackHost(host) {
   return ['127.0.0.1', '::1', 'localhost'].includes(String(host).toLowerCase());
 }
@@ -166,7 +267,9 @@ function send(response, status, data, origin, extraHeaders = {}) {
 
 function rateLimit(request, pathname) {
   const now = Date.now();
-  const isSetup = pathname === '/api/setup';
+  const isSetup = pathname === '/api/setup'
+    || pathname === '/api/setup/preview/delete'
+    || pathname === '/api/history/rollback';
   const isAuth = pathname.startsWith('/api/auth/');
   const windowMs = isSetup || isAuth ? 10 * 60_000 : 60_000;
   const limit = isSetup ? 3 : isAuth ? 20 : request.method === 'POST' ? 30 : 120;
@@ -276,10 +379,43 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
     .some((prefix) => rule.name.startsWith(prefix)) && rule.enabled).length;
   const onboarding = buildOnboardingProgress({ setupBlueprint, config: dashboardConfig, securityRules });
   recordActivationProgress(fullGuild.id, onboarding);
+  const setupSimulation = buildSetupSimulation({
+    analysis: setupAnalysis,
+    blueprint: setupBlueprint,
+    current: {
+      roles: roleList.length,
+      categories: categories.size,
+      channels: Math.max(channels.size - categories.size, 0),
+    },
+  });
+  const channelNames = new Map(channels.filter(Boolean).map((channel) => [channel.id, channel.name]));
+  const contentLibrary = buildContentLibrary({
+    publishedMessages: listPublishedMessages(fullGuild.id),
+    config: dashboardConfig,
+    channelNames,
+  });
+  const contentTrash = listContentTrash(fullGuild.id).map(contentTrashSummary);
+  const changeHistory = listChanges(fullGuild.id, 40).map(({ backupFile, ...change }) => ({
+    ...change,
+    hasBackup: Boolean(backupFile),
+  }));
+  const botMember = fullGuild.members.me || await fullGuild.members.fetchMe().catch(() => null);
   return {
     guilds: availableGuilds.map((item) => ({ id: item.id, name: item.name, icon: item.iconURL() })),
     bot: { username: client.user.tag, online: client.isReady(), ping: Math.round(client.ws.ping) },
-    guild: { id: fullGuild.id, name: fullGuild.name, members: fullGuild.memberCount, channels: channels.size, roles: roles.size },
+    guild: {
+      id: fullGuild.id,
+      name: fullGuild.name,
+      members: fullGuild.memberCount,
+      channels: channels.size,
+      roles: roles.size,
+      botNickname: botMember?.nickname || null,
+      botDisplayName: botMember?.displayName || client.user.username,
+    },
+    publishedMessages: listPublishedMessages(fullGuild.id),
+    contentLibrary,
+    contentTrash,
+    changeHistory,
     metrics: {
       commands: client.commands.size,
       openTickets,
@@ -289,6 +425,7 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
     recentSuggestions: getRecentSuggestions(fullGuild.id),
     setupBlueprint,
     setupAnalysis,
+    setupSimulation,
     onboarding,
     premium: getGuildPremiumState(fullGuild.id, { userId: requestingUserId }),
     community: {
@@ -526,6 +663,43 @@ function startDashboardServer(client) {
         state.creatorAccess = await isApplicationOwner(client, session?.user.id);
         return send(response, 200, state, origin);
       }
+      if (request.method === 'POST' && url.pathname === '/api/bot/nickname') {
+        const body = await readBody(request);
+        requireRecentAuthentication(session);
+        const desired = normalizeBotNickname(body.nickname);
+        const expectedConfirmation = desired ? 'PERSONNALISER' : 'REINITIALISER';
+        if (body.confirmation !== expectedConfirmation) {
+          throw new HttpError(400, `Écrivez ${expectedConfirmation} pour confirmer.`);
+        }
+        const state = await getDashboardState(client, body.guildId, manageableGuildIds);
+        const access = await requireGuildCapability(client, state.guild.id, session, [PermissionFlagsBits.ManageGuild]);
+        const result = await updateGuildBotNickname(
+          access.guild,
+          desired,
+          `Personnalisation FyxBot demandée par ${session.user.username}`,
+        );
+        const displayName = result.nickname || client.user.username;
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'configuration',
+          title: result.nickname ? 'Surnom FyxBot personnalisé' : 'Surnom FyxBot réinitialisé',
+          summary: `Nom affiché : ${displayName}`,
+          details: { target: 'Configuration', changed: result.changed },
+        });
+        await logAction(access.guild, {
+          title: '🤖 Identité du bot mise à jour',
+          description: `Le nom affiché de FyxBot est maintenant **${displayName.replaceAll('*', '')}**. Action réalisée depuis le panel par **${session.user.username}**.`,
+          color: 0xf97316,
+        }).catch((error) => logger.error({ err: error, guildId: state.guild.id }, '[FyxBot] Journalisation secondaire impossible après modification du surnom.'));
+        return send(response, 200, {
+          ok: true,
+          nickname: result.nickname,
+          message: result.nickname
+            ? `FyxBot s’affiche maintenant sous le nom « ${result.nickname} » sur ce serveur.`
+            : `Le nom affiché a été réinitialisé sur « ${client.user.username} » pour ce serveur.`,
+        }, origin);
+      }
       if (request.method === 'POST' && url.pathname === '/api/premium/founder') {
         const body = await readBody(request);
         if (body.confirmation !== 'ACTIVER') throw new HttpError(400, 'Confirmez explicitement l’activation Premium.');
@@ -697,6 +871,14 @@ function startDashboardServer(client) {
         const state = await getDashboardState(client, body.guildId, manageableGuildIds);
         await requireGuildCapability(client, state.guild.id, session, [PermissionFlagsBits.ManageGuild]);
         await updateConfiguration(client, match[1], body, manageableGuildIds);
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'configuration',
+          title: `Configuration ${match[1]}`,
+          summary: `Le module ${match[1]} a été configuré depuis le panel.`,
+          details: { section: match[1] },
+        });
         return send(response, 200, { ok: true }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/moderation') {
@@ -748,6 +930,14 @@ function startDashboardServer(client) {
           }
         }
         await logAction(guild, { title: `🛡️ Sécurité ${body.enabled === false ? 'désactivée' : 'activée'}`, description: `Action réalisée depuis le panel par **${session.user.username}**.`, color: body.enabled === false ? 0xed4245 : 0x57f287 });
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'security',
+          title: body.enabled === false ? 'Sécurité désactivée' : 'Sécurité activée',
+          summary: body.enabled === false ? 'Les protections FyxBot ont été désactivées.' : 'Les quatre protections FyxBot ont été activées.',
+          details: { enabled: body.enabled !== false },
+        });
         return send(response, 200, { ok: true, message: body.enabled === false ? 'Protections FyxBot désactivées.' : '4 protections FyxBot activées.' }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/rules/publish') {
@@ -775,6 +965,14 @@ function startDashboardServer(client) {
           await publishRules(guild, channel, { title, content, verifiedRoleId: roleId });
         }
         await logAction(guild, { title: updating ? '📜 Règlement modifié' : '📜 Règlement publié', description: `Action réalisée depuis le panel par **${session.user.username}**.`, color: 0xf97316 });
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'content',
+          title: updating ? 'Règlement modifié' : 'Règlement publié',
+          summary: `Le règlement « ${title} » a été ${updating ? 'mis à jour' : 'publié'}.`,
+          details: { target: 'Règlement' },
+        });
         return send(response, 200, { ok: true, message: updating ? 'Règlement mis à jour.' : 'Règlement publié.' }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/community/event') {
@@ -867,16 +1065,249 @@ function startDashboardServer(client) {
           await setSocialConfig(state.guild.id, { ...current, sources: filtered, updatedAt: new Date().toISOString() });
           return send(response, 200, { ok: true, message: 'Source automatique supprimée.' }, origin);
         }
+        if (body.action === 'update') {
+          const result = replaceSocialSource(sources, body.sourceId, {
+            platform: body.platform,
+            identifier: body.identifier,
+            label: body.label,
+          });
+          const updatedAt = new Date().toISOString();
+          await setSocialConfig(state.guild.id, { ...current, sources: result.sources, updatedAt });
+          recordChange(state.guild.id, {
+            actorId: session.user.id,
+            actorName: session.user.username,
+            kind: 'content',
+            title: 'Source sociale modifiée',
+            summary: `${result.source.label} · ${result.source.platform === 'twitch' ? 'Twitch' : 'YouTube'}`,
+            details: { target: 'Social', sourceId: result.source.id, identityChanged: result.identityChanged },
+          });
+          return send(response, 200, { ok: true, message: `${result.source.label} a été mise à jour.` }, origin);
+        }
         throw new Error('Action sociale inconnue.');
+      }
+      if (request.method === 'POST' && url.pathname === '/api/content/delete') {
+        const body = await readBody(request);
+        if (body.confirmation !== 'SUPPRIMER') throw new HttpError(400, 'Écrivez SUPPRIMER pour confirmer.');
+        requireRecentAuthentication(session);
+        const state = await getDashboardState(client, body.guildId, manageableGuildIds);
+        const item = state.contentLibrary.find((candidate) => candidate.id === body.itemId);
+        if (!item || !item.removable) throw new HttpError(404, 'Contenu supprimable introuvable. Rechargez le panel.');
+        await requireGuildCapability(client, state.guild.id, session, [
+          item.kind === 'message' ? PermissionFlagsBits.ManageMessages : PermissionFlagsBits.ManageGuild,
+        ]);
+
+        let snapshot;
+        if (item.kind === 'message') {
+          const publication = getPublishedMessage(state.guild.id, item.publicationId);
+          if (!publication) throw new HttpError(404, 'Message publié introuvable. Rechargez le panel.');
+          snapshot = publication;
+        } else if (item.kind === 'rules') {
+          const rules = state.config.rules;
+          if (!rules) throw new HttpError(404, 'Règlement introuvable.');
+          snapshot = rules;
+        } else if (item.kind === 'ticket') {
+          const panels = [...(state.config.tickets?.panels || [])];
+          const panel = panels.find((candidate) => candidate.id === item.entityId);
+          if (!panel) throw new HttpError(404, 'Panneau de tickets introuvable.');
+          snapshot = panel;
+        } else if (item.kind === 'role') {
+          const panels = [...(state.config.rolePanels || [])];
+          const panel = panels.find((candidate) => candidate.id === item.entityId);
+          if (!panel) throw new HttpError(404, 'Panneau de rôles introuvable.');
+          snapshot = panel;
+        } else if (item.kind === 'social') {
+          const current = state.config.social;
+          const sources = [...(current?.sources || [])];
+          snapshot = sources.find((source) => source.id === item.entityId);
+          if (!snapshot) throw new HttpError(404, 'Source sociale introuvable.');
+        } else {
+          throw new HttpError(409, 'Ce contenu doit être désactivé depuis son module.');
+        }
+
+        const archived = archiveContent(state.guild.id, {
+          kind: item.kind,
+          title: item.title,
+          target: item.target,
+          snapshot,
+        });
+        let discordMessageDeleted = false;
+        if (item.kind === 'message') {
+          discordMessageDeleted = await deleteTrackedDiscordMessage(client, state.guild.id, snapshot.channelId, snapshot.messageId);
+          deletePublishedMessage(state.guild.id, snapshot.id);
+        } else if (item.kind === 'rules') {
+          discordMessageDeleted = await deleteTrackedDiscordMessage(client, state.guild.id, snapshot.channelId, snapshot.messageId);
+          await setRulesConfig(state.guild.id, null);
+        } else if (item.kind === 'ticket') {
+          discordMessageDeleted = await deleteTrackedDiscordMessage(client, state.guild.id, snapshot.panelChannelId, snapshot.messageId);
+          await setTicketConfig(state.guild.id, {
+            ...state.config.tickets,
+            panels: [...(state.config.tickets?.panels || [])].filter((candidate) => candidate.id !== snapshot.id),
+            updatedAt: new Date().toISOString(),
+          });
+        } else if (item.kind === 'role') {
+          discordMessageDeleted = await deleteTrackedDiscordMessage(client, state.guild.id, snapshot.channelId, snapshot.messageId);
+          await setRolePanelConfig(state.guild.id, {
+            panels: [...(state.config.rolePanels || [])].filter((candidate) => candidate.id !== snapshot.id),
+            updatedAt: new Date().toISOString(),
+          });
+        } else if (item.kind === 'social') {
+          const current = state.config.social;
+          await setSocialConfig(state.guild.id, {
+            ...current,
+            sources: [...(current?.sources || [])].filter((source) => source.id !== snapshot.id),
+            updatedAt: new Date().toISOString(),
+          });
+        }
+
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'content',
+          title: 'Contenu retiré',
+          summary: item.title,
+          details: { target: item.target, itemId: item.id, trashId: archived.id, discordMessageDeleted },
+        });
+        const suffix = discordMessageDeleted
+          ? ' Le message Discord associé a également été supprimé.'
+          : item.kind === 'social' ? '' : ' Le message Discord associé était déjà absent.';
+        return send(response, 200, { ok: true, message: `${item.title} a été placé dans la corbeille pendant 30 jours.${suffix}` }, origin);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/content/restore') {
+        const body = await readBody(request);
+        if (body.confirmation !== 'RESTAURER') throw new HttpError(400, 'Écrivez RESTAURER pour confirmer.');
+        requireRecentAuthentication(session);
+        const state = await getDashboardState(client, body.guildId, manageableGuildIds);
+        const archived = getContentTrashItem(state.guild.id, body.trashId);
+        if (!archived) throw new HttpError(404, 'Ce contenu a expiré ou a déjà été restauré. Rechargez le panel.');
+        await requireGuildCapability(client, state.guild.id, session, [
+          archived.kind === 'message' ? PermissionFlagsBits.ManageMessages : PermissionFlagsBits.ManageGuild,
+        ]);
+        const guild = await client.guilds.fetch(state.guild.id);
+        const snapshot = archived.snapshot;
+        const fetchTextChannel = async (channelId) => {
+          const channel = await client.channels.fetch(channelId).catch(() => null);
+          if (!channel?.isTextBased() || typeof channel.send !== 'function' || channel.guildId !== state.guild.id) {
+            throw new HttpError(409, 'Le salon Discord d’origine n’existe plus ou ne permet plus de publier.');
+          }
+          return channel;
+        };
+
+        let restoredLocation = '';
+        if (archived.kind === 'message') {
+          const channel = await fetchTextChannel(snapshot.channelId);
+          let payload;
+          try {
+            payload = publicMessagePayload(snapshot);
+          } catch (error) {
+            throw new HttpError(400, `Le message archivé ne peut plus être publié : ${error.message}`);
+          }
+          let message;
+          try {
+            message = await channel.send(payload);
+          } catch (error) {
+            throw messagePublishError(error);
+          }
+          createPublishedMessage(state.guild.id, {
+            ...snapshot,
+            messageId: message.id,
+            channelId: channel.id,
+            channelName: channel.name,
+          });
+          restoredLocation = ` dans #${channel.name}`;
+        } else if (archived.kind === 'rules') {
+          if (state.config.rules) throw new HttpError(409, 'Un règlement actif existe déjà. Retirez-le avant de restaurer celui-ci.');
+          const channel = await fetchTextChannel(snapshot.channelId);
+          try {
+            await publishRules(guild, channel, {
+              title: snapshot.title,
+              content: snapshot.content,
+              verifiedRoleId: snapshot.verifiedRoleId || null,
+            });
+          } catch (error) {
+            throw messagePublishError(error);
+          }
+          restoredLocation = ` dans #${channel.name}`;
+        } else if (archived.kind === 'ticket') {
+          if ([...(state.config.tickets?.panels || [])].some((panel) => panel.id === snapshot.id)) {
+            throw new HttpError(409, 'Ce panneau de tickets est déjà actif.');
+          }
+          const channel = await fetchTextChannel(snapshot.panelChannelId);
+          const panel = {
+            ...snapshot,
+            updatedAt: new Date().toISOString(),
+          };
+          const embed = new EmbedBuilder().setColor(0xf97316).setTitle(`🎫 ${panel.title}`).setDescription(`Vous souhaitez envoyer une demande **${panel.requestType || 'support'}** ? Cliquez sur le bouton ci-dessous pour ouvrir un ticket privé avec notre équipe.\n\nMerci de ne créer qu’un ticket par demande.`).setFooter({ text: 'FyxBot • Système de tickets' }).setTimestamp();
+          let message;
+          try {
+            message = await channel.send({ embeds: [embed], components: createPanelComponents(panel.id, `Ouvrir : ${panel.requestType || 'support'}`) });
+          } catch (error) {
+            throw messagePublishError(error);
+          }
+          panel.messageId = message.id;
+          await setTicketConfig(state.guild.id, {
+            ...(state.config.tickets || { categoryId: panel.categoryId, staffRoleId: panel.staffRoleId }),
+            panels: [...(state.config.tickets?.panels || []), panel],
+            updatedAt: panel.updatedAt,
+          });
+          restoredLocation = ` dans #${channel.name}`;
+        } else if (archived.kind === 'role') {
+          if ([...(state.config.rolePanels || [])].some((panel) => panel.id === snapshot.id)) {
+            throw new HttpError(409, 'Ce panneau de rôles est déjà actif.');
+          }
+          const channel = await fetchTextChannel(snapshot.channelId);
+          const roles = await validatedPanelRoles(guild, state, snapshot.roleIds);
+          const panel = { ...snapshot, updatedAt: new Date().toISOString() };
+          let message;
+          try {
+            message = await channel.send(rolePanelPayload(panel, roles));
+          } catch (error) {
+            throw messagePublishError(error);
+          }
+          panel.messageId = message.id;
+          await setRolePanelConfig(state.guild.id, {
+            panels: [...(state.config.rolePanels || []), panel],
+            updatedAt: panel.updatedAt,
+          });
+          restoredLocation = ` dans #${channel.name}`;
+        } else if (archived.kind === 'social') {
+          const current = state.config.social;
+          if (!current?.channelId) throw new HttpError(409, 'Configurez d’abord le salon des notifications sociales.');
+          if ([...(current.sources || [])].some((source) => source.id === snapshot.id)) {
+            throw new HttpError(409, 'Cette source sociale est déjà active.');
+          }
+          await setSocialConfig(state.guild.id, {
+            ...current,
+            sources: [...(current.sources || []), { ...snapshot, updatedAt: new Date().toISOString() }],
+            updatedAt: new Date().toISOString(),
+          });
+        } else {
+          throw new HttpError(409, 'Ce type de contenu ne peut pas être restauré.');
+        }
+
+        removeContentTrashItem(state.guild.id, archived.id);
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'content',
+          title: 'Contenu restauré',
+          summary: archived.title,
+          details: { target: archived.target, trashId: archived.id },
+        });
+        return send(response, 200, { ok: true, message: `${archived.title} a été restauré${restoredLocation}.` }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/messages/send') {
         const body = await readBody(request);
-        if (body.confirmation !== 'PUBLIER') throw new HttpError(400, 'Écrivez PUBLIER pour confirmer.');
+        const editing = Boolean(body.publicationId);
+        const expectedConfirmation = editing ? 'MODIFIER' : 'PUBLIER';
+        if (body.confirmation !== expectedConfirmation) throw new HttpError(400, `Écrivez ${expectedConfirmation} pour confirmer.`);
         const state = await getDashboardState(client, body.guildId, manageableGuildIds);
         await requireGuildCapability(client, state.guild.id, session, [PermissionFlagsBits.ManageMessages]);
+        const existingPublication = editing ? getPublishedMessage(state.guild.id, body.publicationId) : null;
+        if (editing && !existingPublication) throw new HttpError(404, 'Message publié introuvable. Rechargez le panel.');
         let channelId;
         try {
-          channelId = validateId(body.channelId, new Set(state.options.textChannels.map((channel) => channel.id)), 'Salon de publication');
+          channelId = existingPublication?.channelId
+            || validateId(body.channelId, new Set(state.options.textChannels.map((channel) => channel.id)), 'Salon de publication');
         } catch (error) {
           throw new HttpError(400, error.message);
         }
@@ -887,7 +1318,7 @@ function startDashboardServer(client) {
         }
         let payload;
         try {
-          payload = customMessagePayload({
+          payload = publicMessagePayload({
             mode: body.mode,
             content: body.content,
             title: body.title,
@@ -909,22 +1340,55 @@ function startDashboardServer(client) {
           [PermissionFlagsBits.ViewChannel, 'Voir le salon'],
           [PermissionFlagsBits.SendMessages, 'Envoyer des messages'],
           ...(payload.embeds?.length ? [[PermissionFlagsBits.EmbedLinks, 'Intégrer des liens']] : []),
+          ...(editing ? [[PermissionFlagsBits.ReadMessageHistory, 'Voir l’historique des messages']] : []),
         ].filter(([permission]) => !botPermissions?.has(permission)).map(([, label]) => label);
         if (missingPermissions.length) {
           throw new HttpError(403, `FyxBot ne peut pas publier dans ce salon. Permission(s) manquante(s) : ${missingPermissions.join(', ')}.`);
         }
+        let publication;
         try {
-          await channel.send(payload);
+          if (editing) {
+            const message = await channel.messages.fetch(existingPublication.messageId);
+            if (message.author.id !== client.user.id) throw new HttpError(403, 'FyxBot ne peut modifier que ses propres messages.');
+            await message.edit({
+              ...payload,
+              content: payload.content || null,
+              embeds: payload.embeds || [],
+              components: payload.components || [],
+            });
+            publication = updatePublishedMessage(state.guild.id, existingPublication.id, body);
+          } else {
+            const message = await channel.send(payload);
+            publication = createPublishedMessage(state.guild.id, {
+              ...body,
+              messageId: message.id,
+              channelId: channel.id,
+              channelName: channel.name,
+            });
+          }
         } catch (error) {
+          if (error instanceof HttpError) throw error;
           throw messagePublishError(error);
         }
         const guild = await client.guilds.fetch(state.guild.id);
         await logAction(guild, {
-          title: body.mode === 'changelog' ? '📰 Changelog publié' : '✉️ Message personnalisé publié',
-          description: `Publication dans ${channel} depuis le panel par **${session.user.username}**.`,
+          title: editing ? '✏️ Message personnalisé modifié' : '✉️ Message personnalisé publié',
+          description: `${editing ? 'Modification' : 'Publication'} dans ${channel} depuis le panel par **${session.user.username}**.`,
           color: 0xef4444,
-        }).catch((error) => console.error('[FyxBot] Journalisation secondaire impossible après publication :', error.message));
-        return send(response, 200, { ok: true, message: `Message publié dans #${channel.name}.` }, origin);
+        }).catch((error) => logger.error({ err: error, guildId: state.guild.id }, '[FyxBot] Journalisation secondaire impossible après publication.'));
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'content',
+          title: editing ? 'Message personnalisé modifié' : 'Message personnalisé publié',
+          summary: `${publication.title || publication.content?.slice(0, 80) || 'Message'} · #${channel.name}`,
+          details: { target: 'Messages', publicationId: publication.id, channelId: channel.id },
+        });
+        return send(response, 200, {
+          ok: true,
+          publication,
+          message: editing ? `Message modifié dans #${channel.name}.` : `Message publié dans #${channel.name}.`,
+        }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/voice/setup') {
         const body = await readBody(request);
@@ -940,6 +1404,14 @@ function startDashboardServer(client) {
           defaultLimit: Math.min(Math.max(Number(body.defaultLimit) || 0, 0), 99),
         });
         await logAction(guild, { title: '🔊 Vocaux temporaires configurés', description: `Générateur <#${config.hubChannelId}> configuré depuis le panel par **${session.user.username}**.`, color: 0x5865f2 });
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'configuration',
+          title: 'Vocaux temporaires configurés',
+          summary: `Le générateur ${config.hubName || 'vocal'} a été configuré.`,
+          details: { target: 'Vocaux', hubChannelId: config.hubChannelId },
+        });
         return send(response, 200, { ok: true, message: 'Générateur de salons vocaux temporaires configuré.' }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/tickets/publish') {
@@ -960,6 +1432,11 @@ function startDashboardServer(client) {
         panel.messageId = message.id;
         const panels = [...(state.config.tickets?.panels || []), panel];
         await setTicketConfig(state.guild.id, { ...panel, panels, updatedAt: panel.updatedAt });
+        recordChange(state.guild.id, {
+          actorId: session.user.id, actorName: session.user.username, kind: 'content',
+          title: 'Panneau de tickets publié', summary: `${panel.title} · #${channel.name}`,
+          details: { target: 'Tickets', panelId: panel.id },
+        });
         return send(response, 200, { ok: true, message: `Panneau publié dans #${channel.name}.` }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/tickets/update') {
@@ -984,6 +1461,11 @@ function startDashboardServer(client) {
         }
         panels[index] = updated;
         await setTicketConfig(state.guild.id, { ...state.config.tickets, ...updated, panels, updatedAt: updated.updatedAt });
+        recordChange(state.guild.id, {
+          actorId: session.user.id, actorName: session.user.username, kind: 'content',
+          title: 'Panneau de tickets modifié', summary: updated.title,
+          details: { target: 'Tickets', panelId: updated.id },
+        });
         return send(response, 200, { ok: true, message: `Panneau ${updated.title} modifié.` }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/roles/publish') {
@@ -1009,6 +1491,11 @@ function startDashboardServer(client) {
         const panels = [...(state.config.rolePanels || []), panel];
         await setRolePanelConfig(guild.id, { panels, updatedAt: panel.updatedAt });
         await logAction(guild, { title: '🎭 Panneau de rôles publié', description: `Panneau **${panel.title}** publié dans ${channel} depuis le panel par **${session.user.username}**.`, color: 0xf97316 });
+        recordChange(state.guild.id, {
+          actorId: session.user.id, actorName: session.user.username, kind: 'content',
+          title: 'Panneau de rôles publié', summary: `${panel.title} · #${channel.name}`,
+          details: { target: 'Rôles', panelId: panel.id },
+        });
         return send(response, 200, { ok: true, message: `Panneau de rôles publié dans #${channel.name}.` }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/roles/update') {
@@ -1037,6 +1524,11 @@ function startDashboardServer(client) {
         panels[index] = updated;
         await setRolePanelConfig(guild.id, { panels, updatedAt: updated.updatedAt });
         await logAction(guild, { title: '🎭 Panneau de rôles modifié', description: `Panneau **${updated.title}** modifié depuis le panel par **${session.user.username}**.`, color: 0xf97316 });
+        recordChange(state.guild.id, {
+          actorId: session.user.id, actorName: session.user.username, kind: 'content',
+          title: 'Panneau de rôles modifié', summary: updated.title,
+          details: { target: 'Rôles', panelId: updated.id },
+        });
         return send(response, 200, { ok: true, message: `Panneau ${updated.title} modifié.` }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/suggestions/review') {
@@ -1065,6 +1557,70 @@ function startDashboardServer(client) {
         });
         return send(response, 200, { ok: true, message: `Suggestion ${accepted ? 'acceptée' : 'refusée'}.` }, origin);
       }
+      if (request.method === 'POST' && url.pathname === '/api/history/rollback') {
+        const body = await readBody(request);
+        if (body.confirmation !== 'RESTAURER') throw new HttpError(400, 'Écrivez RESTAURER pour confirmer le retour arrière.');
+        const state = await getDashboardState(client, body.guildId, manageableGuildIds);
+        await requireGuildCapability(client, state.guild.id, session, [], { administratorOnly: true });
+        requireRecentAuthentication(session);
+        const target = getChange(state.guild.id, String(body.changeId || ''));
+        if (!target) throw new HttpError(404, 'Modification introuvable dans l’historique.');
+        if (!target.reversible || !target.backupFile) throw new HttpError(409, 'Cette modification ne possède pas de sauvegarde restaurable.');
+        if (target.status !== 'applied') throw new HttpError(409, 'Cette modification a déjà fait l’objet d’un retour arrière.');
+        const guild = await client.guilds.fetch(state.guild.id);
+        const fullGuild = await guild.fetch();
+        const botMember = await fullGuild.members.fetchMe();
+        if (!botMember.permissions.has(PermissionFlagsBits.Administrator)) {
+          throw new HttpError(409, 'Pour restaurer une structure contenant des salons privés, accordez temporairement Administrateur au rôle FyxBot. Retirez-la immédiatement après la restauration.');
+        }
+        const result = await restoreServer(fullGuild, target.backupFile);
+        markChangeRolledBack(state.guild.id, target.id, session.user.username);
+        const rollbackChange = recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'rollback',
+          title: `Retour arrière : ${target.title}`,
+          summary: `L’état précédent la modification du ${new Date(target.createdAt).toLocaleString('fr-FR')} a été restauré.`,
+          details: {
+            sourceChangeId: target.id,
+            createdRoles: result.createdRoles,
+            createdChannels: result.createdChannels,
+            deletedRoles: result.deletedRoles,
+            deletedChannels: result.deletedChannels,
+          },
+          backupFile: result.safetyBackupFile,
+          reversible: true,
+        });
+        return send(response, 200, {
+          ok: true,
+          change: { ...rollbackChange, backupFile: undefined, hasBackup: true },
+          message: `Retour arrière terminé : ${result.createdRoles} rôle(s) et ${result.createdChannels} salon(s) restaurés. Vous pouvez maintenant retirer Administrateur à FyxBot.`,
+        }, origin);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/setup/preview/delete') {
+        const body = await readBody(request);
+        if (body.confirmation !== 'SUPPRIMER') throw new Error('Confirmez la suppression de l’aperçu.');
+        const state = await getDashboardState(client, body.guildId, manageableGuildIds);
+        await requireGuildCapability(client, state.guild.id, session, [PermissionFlagsBits.ManageGuild]);
+        const removed = deleteServerSetupPreview(state.guild.id);
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'design',
+          title: 'Aperçu de configuration supprimé',
+          summary: removed
+            ? 'La proposition enregistrée a été retirée du panel sans modifier Discord.'
+            : 'Aucune proposition enregistrée ne devait être retirée.',
+          details: { previewOnly: true, removed },
+        });
+        return send(response, 200, {
+          ok: true,
+          removed,
+          message: removed
+            ? 'Aperçu supprimé. Aucun rôle, catégorie ou salon Discord n’a été modifié.'
+            : 'Aucun aperçu enregistré.',
+        }, origin);
+      }
       if (request.method === 'POST' && url.pathname === '/api/setup') {
         const body = await readBody(request);
         const mode = ['design', 'complete', 'synchronize', 'reset'].includes(body.mode) ? body.mode : 'design';
@@ -1076,10 +1632,28 @@ function startDashboardServer(client) {
           const blueprint = buildAdaptiveBlueprint(body.description, { guildName: state.guild.name });
           saveServerSetupDraft(state.guild.id, blueprint);
           const analysis = await analyzeServerStructure(await guild.fetch(), {}, blueprint);
+          const simulation = buildSetupSimulation({
+            analysis,
+            blueprint,
+            current: {
+              roles: state.options.roles.length,
+              categories: state.options.categories.length,
+              channels: state.options.textChannels.length + state.options.voiceChannels.length,
+            },
+          });
+          recordChange(state.guild.id, {
+            actorId: session.user.id,
+            actorName: session.user.username,
+            kind: 'design',
+            title: 'Nouvelle proposition de structure',
+            summary: `${blueprint.roles.length} rôle(s), ${blueprint.categories.length} catégorie(s) et ${blueprint.channels.length} salon(s) proposés sans modification Discord.`,
+            details: { detectedNeeds: blueprint.detectedNeeds, previewOnly: true },
+          });
           return send(response, 200, {
             ok: true,
             blueprint,
             analysis,
+            simulation,
             message: `Proposition générée : ${blueprint.roles.length} rôle(s), ${blueprint.categories.length} catégorie(s) et ${blueprint.channels.length} salon(s). Aucune modification Discord effectuée.`,
           }, origin);
         }
@@ -1092,6 +1666,25 @@ function startDashboardServer(client) {
         const result = destructive
           ? await resetServer(await guild.fetch(), { blueprint })
           : await setupServer(await guild.fetch(), { blueprint, synchronizePermissions: mode === 'synchronize' });
+        const reversibleBackup = destructive ? result.backupFile : backupFile;
+        recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'structure',
+          title: destructive ? 'Serveur reconstruit' : mode === 'synchronize' ? 'Structure synchronisée' : 'Structure complétée',
+          summary: destructive
+            ? `${result.deletedChannels} salon(s) et ${result.deletedRoles} rôle(s) remplacés par la proposition FyxBot.`
+            : `${result.created} élément(s) créé(s) et ${result.updated} corrigé(s).`,
+          details: {
+            mode,
+            created: result.created || 0,
+            updated: result.updated || 0,
+            deletedChannels: result.deletedChannels || 0,
+            deletedRoles: result.deletedRoles || 0,
+          },
+          backupFile: reversibleBackup,
+          reversible: true,
+        });
         return send(response, 200, {
           ok: true,
           created: result.created,
@@ -1105,14 +1698,20 @@ function startDashboardServer(client) {
       return send(response, 404, { error: 'Route inconnue.' }, origin);
     } catch (error) {
       const publicError = panelErrorResponse(error);
-      console.error(`[FyxBot] Erreur du panel (${publicError.status})${publicError.reference ? ` [${publicError.reference}]` : ''} :`, error.message);
+      logger.error({
+        err: error,
+        method: request.method,
+        path: request.url,
+        reference: publicError.reference || null,
+        status: publicError.status,
+      }, '[FyxBot] Requête du panel en erreur.');
       return send(response, publicError.status, { error: publicError.error }, origin);
     }
   });
-  server.listen(PORT, HOST, () => console.log(`[FyxBot] API du panel reliée sur http://${HOST}:${PORT}.`));
-  server.on('error', (error) => console.error('[FyxBot] Serveur du panel indisponible :', error));
+  server.listen(PORT, HOST, () => logger.info({ host: HOST, port: PORT }, '[FyxBot] API du panel démarrée.'));
+  server.on('error', (error) => logger.fatal({ err: error, host: HOST, port: PORT }, '[FyxBot] Serveur du panel indisponible.'));
   server.on('close', () => authCleanup.stop());
   return server;
 }
 
-module.exports = { buildAllowedOrigins, getDashboardState, isLoopbackHost, isRequestOriginAllowed, messagePublishError, panelErrorResponse, rateLimit, requireGuildCapability, requireRecentAuthentication, revalidateManageableGuildIds, startDashboardServer };
+module.exports = { buildAllowedOrigins, contentDeleteError, deleteTrackedDiscordMessage, getDashboardState, isLoopbackHost, isRequestOriginAllowed, messagePublishError, normalizeBotNickname, panelErrorResponse, rateLimit, requireGuildCapability, requireRecentAuthentication, revalidateManageableGuildIds, startDashboardServer, updateGuildBotNickname };

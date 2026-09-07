@@ -7,6 +7,7 @@ const {
   MessageFlags,
   PermissionFlagsBits,
 } = require('discord.js');
+const logger = require('./logger').logger.child({ component: 'giveaways' });
 
 const GIVEAWAY_BUTTON_PREFIX = 'giveaway:join:';
 
@@ -212,7 +213,7 @@ async function finalizeDueGiveaways(client, { targetDatabase, now = new Date(), 
     try {
       results.push(await finalizeGiveaway(client, row, { targetDatabase: activeDatabase, now, randomIndex }));
     } catch (error) {
-      console.error(`[FyxBot] Tirage du concours ${row.giveaway_id} impossible :`, error);
+      logger.error({ err: error, giveawayId: row.giveaway_id }, '[FyxBot] Tirage du concours impossible.');
       results.push({ giveawayId: row.giveaway_id, error: error.message });
     }
   }
@@ -233,7 +234,7 @@ function startGiveawayScheduler(client, { targetDatabase, intervalMs = 60_000 } 
     try {
       await finalizeDueGiveaways(client, { targetDatabase });
     } catch (error) {
-      console.error('[FyxBot] Vérification des concours impossible :', error);
+      logger.error({ err: error }, '[FyxBot] Vérification des concours impossible.');
     } finally {
       running = false;
     }

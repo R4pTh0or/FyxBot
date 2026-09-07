@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 const { migrateLegacyLocalBackups } = require('../src/services/serverBackup');
 
 migrateLegacyLocalBackups()

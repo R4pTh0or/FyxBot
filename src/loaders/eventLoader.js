@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const logger = require('../services/logger').logger.child({ component: 'event-loader' });
 
 async function loadEvents(client) {
   const eventsDirectory = path.join(__dirname, '..', 'events');
@@ -15,7 +16,7 @@ async function loadEvents(client) {
     event.once ? client.once(event.name, listener) : client.on(event.name, listener);
   }
 
-  console.log(`[FyxBot] ${files.length} événement(s) chargé(s).`);
+  logger.info({ eventCount: files.length }, '[FyxBot] Événements chargés.');
 }
 
 module.exports = { loadEvents };

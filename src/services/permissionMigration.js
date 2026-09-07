@@ -1,6 +1,7 @@
 const { getServerSetupConfig, setServerSetupConfig } = require('../database/serverSetupStore');
 const { backupServer } = require('./serverBackup');
 const { setupServer } = require('./serverSetup');
+const appLogger = require('./logger').logger.child({ component: 'permission-migration' });
 
 const PERMISSION_MODEL_VERSION = 2;
 const DISABLED_SCOPES = new Set(['', 'off', 'disabled', 'none']);
@@ -32,7 +33,7 @@ async function runPermissionMigration(client, options = {}) {
     setConfig: options.setConfig || setServerSetupConfig,
     backup: options.backup || backupServer,
     synchronize: options.synchronize || setupServer,
-    logger: options.logger || console,
+    logger: options.logger || appLogger,
   };
   if (!permissionMigrationEnabled(scope)) {
     return { enabled: false, scope, targets: 0, migrated: [], skipped: [], errors: [] };

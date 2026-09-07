@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const { Client, Collection, GatewayIntentBits } = require('discord.js');
 const { getConfig } = require('./config');
@@ -8,6 +8,7 @@ const { startDashboardServer } = require('./services/dashboardServer');
 const { startExternalBackupScheduler } = require('./services/externalBackup');
 const { startBirthdayScheduler } = require('./services/birthdays');
 const { startSocialNotificationScheduler } = require('./services/socialAutomation');
+const logger = require('./services/logger').logger.child({ component: 'bootstrap' });
 
 async function start() {
   const config = getConfig();
@@ -29,7 +30,7 @@ async function start() {
   const shutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`[FyxBot] Arrêt propre demandé (${signal}).`);
+    logger.info({ signal }, '[FyxBot] Arrêt propre demandé.');
     backupScheduler.stop();
     birthdayScheduler.stop();
     socialScheduler.stop();
@@ -44,6 +45,6 @@ async function start() {
 }
 
 start().catch((error) => {
-  console.error('[FyxBot] Échec du démarrage :', error);
+  logger.fatal({ err: error }, '[FyxBot] Échec du démarrage.');
   process.exitCode = 1;
 });

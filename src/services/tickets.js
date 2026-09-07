@@ -9,6 +9,7 @@ const {
 } = require('discord.js');
 const { getTicketConfig } = require('../database/ticketStore');
 const { logAction, sendTicketTranscript } = require('./logs');
+const logger = require('./logger').logger.child({ component: 'tickets' });
 
 const CREATE_BUTTON_ID = 'ticket:create';
 const CLOSE_BUTTON_ID = 'ticket:close';
@@ -157,7 +158,9 @@ async function closeTicket(interaction) {
 
   await interaction.message.edit({ components: [] });
   await interaction.channel.send({ content: `🔒 Ticket fermé par ${interaction.user}. Vous pouvez le conserver comme archive, le réouvrir ou le supprimer.`, components: createClosedTicketComponents() });
-  await sendTicketTranscript(interaction.channel, interaction.user, ownerId).catch(console.error);
+  await sendTicketTranscript(interaction.channel, interaction.user, ownerId).catch((error) => {
+    logger.error({ err: error, channelId: interaction.channelId, guildId: interaction.guildId }, '[FyxBot] Transcription du ticket impossible.');
+  });
   await logAction(interaction.guild, {
     title: '🔒 Ticket fermé',
     description: `**${interaction.channel.name}** a été fermé par ${interaction.user}.`,
@@ -205,7 +208,9 @@ async function deleteTicket(interaction) {
     description: `**${interaction.channel.name}** sera supprimé par ${interaction.user}.`,
     color: 0xed4245,
   });
-  setTimeout(() => interaction.channel.delete(`Ticket supprimé par ${interaction.user.tag}`).catch(console.error), 5_000);
+  setTimeout(() => interaction.channel.delete(`Ticket supprimé par ${interaction.user.tag}`).catch((error) => {
+    logger.error({ err: error, channelId: interaction.channelId, guildId: interaction.guildId }, '[FyxBot] Suppression du ticket impossible.');
+  }), 5_000);
 }
 
 async function handleTicketButton(interaction) {

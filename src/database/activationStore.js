@@ -80,6 +80,7 @@ function getActivationStats(guildIds, { targetDatabase, now = new Date() } = {})
     return activatedAt.getTime() - firstSeen.getTime() <= DAY_MS;
   }).length;
   const sinceDate = new Date(asDate(now).getTime() - 29 * DAY_MS);
+  const stalledBefore = new Date(asDate(now).getTime() - 7 * DAY_MS);
   const sinceDay = sinceDate.toISOString().slice(0, 10);
   const activeIds = new Set(store.prepare('SELECT DISTINCT guild_id AS guildId FROM command_usage WHERE day >= ?').all(sinceDay)
     .map((row) => row.guildId).filter((guildId) => allowed.has(guildId)));
@@ -90,6 +91,14 @@ function getActivationStats(guildIds, { targetDatabase, now = new Date() } = {})
     const completedGuilds = rows.filter((row) => row.stepKeys.includes(step.key)).length;
     return { key: step.key, title: step.title, completedGuilds, rate: percent(completedGuilds, ids.length) };
   });
+  const stalledGuilds7d = rows.filter((row) => row.completedSteps < ACTIVATION_THRESHOLD
+    && row.lastObservedAt
+    && new Date(row.lastObservedAt) < stalledBefore).length;
+  const completionDistribution = [
+    { key: 'starting', title: '0 à 3 étapes', guilds: rows.filter((row) => row.completedSteps < ACTIVATION_THRESHOLD).length },
+    { key: 'activated', title: '4 à 6 étapes', guilds: rows.filter((row) => row.completedSteps >= ACTIVATION_THRESHOLD && row.completedSteps < STEP_DEFINITIONS.length).length },
+    { key: 'complete', title: '7 étapes', guilds: rows.filter((row) => row.completedSteps >= STEP_DEFINITIONS.length).length },
+  ];
   return {
     threshold: ACTIVATION_THRESHOLD,
     totalSteps: STEP_DEFINITIONS.length,
@@ -101,10 +110,12 @@ function getActivationStats(guildIds, { targetDatabase, now = new Date() } = {})
     activatedWithin24h,
     activation24hRate: eligibleRows.length ? percent(activatedWithin24h, eligibleRows.length) : null,
     activeGuilds30d: activeIds.size,
+    stalledGuilds7d,
     averageCompletedSteps: rows.length
       ? Math.round((rows.reduce((total, row) => total + row.completedSteps, 0) / rows.length) * 10) / 10
       : 0,
     steps,
+    completionDistribution,
     guilds: rows.map((row) => ({
       guildId: row.guildId,
       completedSteps: row.completedSteps,

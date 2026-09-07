@@ -42,6 +42,29 @@ test("affiche le Control Center FyxBot côté serveur", async () => {
   assert.doesNotMatch(html, /DISCORD_TOKEN|DISCORD_CLIENT_SECRET|BACKUP_SECRET|PRIVATE KEY/i);
 });
 
+test("isole l’aperçu V2 sans remplacer le panel V1", async () => {
+  const [response, v1Page, v2Page, dashboard, css] = await Promise.all([
+    render("/v2"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/v2/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/Dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<title>FyxBot Control Center V2 — Aperçu local<\/title>/i);
+  assert.match(html, /name="robots" content="noindex, nofollow"/i);
+  assert.match(v1Page, /<Dashboard\s*\/>/);
+  assert.doesNotMatch(v1Page, /variant="v2"/);
+  assert.match(v2Page, /<Dashboard variant="v2"\s*\/>/);
+  assert.match(dashboard, /Centre de pilotage FyxBot V2/);
+  assert.match(dashboard, /data\.onboarding\.percent/);
+  assert.match(dashboard, /data\.recentLogs\.slice\(0, 3\)/);
+  assert.match(css, /data-dashboard-version="v2"/);
+  assert.match(css, /V2 · APERÇU LOCAL/);
+});
+
 test("publie les informations légales et la procédure de signalement à jour", async () => {
   const [terms, privacy, support, changelog] = await Promise.all([
     render("/conditions-utilisation"),
@@ -113,6 +136,11 @@ test("conserve les protections essentielles du panel", async () => {
   assert.match(dashboard, /RÈGLEMENT INTERACTIF/);
   assert.match(dashboard, /SALONS VOCAUX TEMPORAIRES/);
   assert.match(dashboard, /CONSTRUCTEUR DE MESSAGES/);
+  assert.match(dashboard, /MESSAGES PUBLIÉS/);
+  assert.match(dashboard, /Retrouver et modifier une publication/);
+  assert.match(dashboard, /messagePublicationId/);
+  assert.match(dashboard, /publicationId: form\.messagePublicationId/);
+  assert.doesNotMatch(dashboard, /<option value="changelog">/);
   assert.match(dashboard, /Archives réouvrables/);
   assert.match(dashboard, /APERÇU DISCORD/);
   assert.match(dashboard, /PARCOURS GUIDÉ/);

@@ -9,7 +9,7 @@
   "scripts": {
     "release:sync": "node scripts/sync-release-manifest.mjs",
     "predev": "pnpm run release:sync",
-    "dev": "vinext dev",
+    "dev": "vinext dev --hostname 127.0.0.1",
     "prebuild": "pnpm run release:sync",
     "build": "vinext build",
     "prestart": "pnpm run release:sync",

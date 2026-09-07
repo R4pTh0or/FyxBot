@@ -9,7 +9,9 @@ const {
   decodeSnapshot,
   getLocalBackupEncryptionKey,
   migrateLegacyLocalBackups,
+  restorationPermissionOverwrites,
 } = require('../src/services/serverBackup');
+const { PermissionFlagsBits } = require('discord.js');
 
 test('les sauvegardes locales sont authentifiées et ne contiennent pas le JSON en clair', () => {
   const key = crypto.randomBytes(32);
@@ -49,4 +51,43 @@ test('convertit et vérifie les anciennes sauvegardes en clair', async (context)
   assert.equal(await fs.stat(path.join(directory, filename)).then(() => true).catch(() => false), false);
   const encrypted = await fs.readFile(path.join(directory, `${filename}.enc`));
   assert.deepEqual(JSON.parse(decryptPayload(encrypted, Buffer.from(encodedKey, 'base64')).plain.toString('utf8')), snapshot);
+});
+
+test('conserve temporairement l’accès du bot pendant une restauration privée', () => {
+  const guild = {
+    id: '123456789012345678',
+    members: { me: { id: '234567890123456789' } },
+    roles: { cache: new Map() },
+  };
+  const overwrites = restorationPermissionOverwrites([
+    {
+      id: guild.id,
+      type: 0,
+      allow: '0',
+      deny: PermissionFlagsBits.ViewChannel.toString(),
+    },
+  ], guild, new Map([[guild.id, guild.id]]));
+  const temporary = overwrites.find((overwrite) => overwrite.id === guild.members.me.id);
+  assert.ok(temporary);
+  assert.equal((temporary.allow & PermissionFlagsBits.ViewChannel) !== 0n, true);
+  assert.equal((temporary.allow & PermissionFlagsBits.ManageChannels) !== 0n, true);
+});
+
+test('retire un refus temporaire existant pour le membre bot', () => {
+  const guild = {
+    id: '123456789012345678',
+    members: { me: { id: '234567890123456789' } },
+    roles: { cache: new Map() },
+  };
+  const overwrites = restorationPermissionOverwrites([
+    {
+      id: guild.members.me.id,
+      type: 1,
+      allow: '0',
+      deny: (PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ManageChannels).toString(),
+    },
+  ], guild, new Map());
+  assert.equal(overwrites.length, 1);
+  assert.equal((overwrites[0].deny & PermissionFlagsBits.ViewChannel) === 0n, true);
+  assert.equal((overwrites[0].deny & PermissionFlagsBits.ManageChannels) === 0n, true);
 });

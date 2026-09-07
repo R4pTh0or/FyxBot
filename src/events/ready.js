@@ -5,32 +5,33 @@ const { syncPremiumEntitlements } = require('../services/premiumEntitlements');
 const { startGiveawayScheduler } = require('../services/communityGiveaways');
 const { runPermissionMigration } = require('../services/permissionMigration');
 const { migrateLegacyLocalBackups } = require('../services/serverBackup');
+const logger = require('../services/logger').logger.child({ component: 'startup' });
 
 module.exports = {
   name: Events.ClientReady,
   once: true,
   async execute(client) {
     syncCreatorStats(client.guilds.cache.values());
-    console.log(`[FyxBot] Connecté en tant que ${client.user.tag}.`);
+    logger.info({ botTag: client.user.tag, guildCount: client.guilds.cache.size }, '[FyxBot] Connexion Discord établie.');
     try {
       const migratedBackups = await migrateLegacyLocalBackups();
-      if (migratedBackups > 0) console.log(`[FyxBot] ${migratedBackups} sauvegarde(s) locale(s) chiffrée(s) et vérifiée(s).`);
+      if (migratedBackups > 0) logger.info({ migratedBackups }, '[FyxBot] Sauvegardes locales chiffrées et vérifiées.');
     } catch (error) {
-      console.error('[FyxBot] Chiffrement des sauvegardes locales indisponible :', error);
+      logger.error({ err: error }, '[FyxBot] Chiffrement des sauvegardes locales indisponible.');
     }
     const result = await broadcastPendingChangelogs(client);
-    if (result.published > 0) console.log(`[FyxBot] ${result.published} annonce(s) de changelog publiée(s).`);
+    if (result.published > 0) logger.info({ published: result.published }, '[FyxBot] Annonces de changelog publiées.');
     try {
       const permissions = await runPermissionMigration(client);
-      if (permissions.enabled) console.log('[FyxBot][Permissions v2]', JSON.stringify(permissions));
+      if (permissions.enabled) logger.info({ permissions }, '[FyxBot] Migration des permissions terminée.');
     } catch (error) {
-      console.error('[FyxBot][Permissions v2] Migration indisponible :', error);
+      logger.error({ err: error }, '[FyxBot] Migration des permissions indisponible.');
     }
     try {
       const premium = await syncPremiumEntitlements(client);
-      if (premium.configured) console.log(`[FyxBot] ${premium.synced} droit(s) Premium Discord synchronisé(s).`);
+      if (premium.configured) logger.info({ synced: premium.synced }, '[FyxBot] Droits Premium Discord synchronisés.');
     } catch (error) {
-      console.error('[FyxBot] Synchronisation Premium Discord indisponible :', error);
+      logger.error({ err: error }, '[FyxBot] Synchronisation Premium Discord indisponible.');
     }
     startGiveawayScheduler(client);
   },

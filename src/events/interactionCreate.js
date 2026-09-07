@@ -6,6 +6,18 @@ const { scheduleInteractionCleanup } = require('../services/interactionCleanup')
 const { recordCommandUsage } = require('../database/commandUsageStore');
 const { GIVEAWAY_BUTTON_PREFIX, handleGiveawayButton } = require('../services/communityGiveaways');
 const { FOUNDER_CLAIM_BUTTON_ID, handlePremiumButton } = require('../services/premiumInteractions');
+const logger = require('../services/logger').logger.child({ component: 'interaction' });
+
+function logInteractionError(error, message, interaction, details = {}) {
+  logger.error({
+    err: error,
+    commandName: interaction?.commandName || null,
+    customId: interaction?.customId || null,
+    guildId: interaction?.guildId || null,
+    userId: interaction?.user?.id || null,
+    ...details,
+  }, message);
+}
 
 function commandErrorMessage(error) {
   if ([50001, 50013].includes(Number(error?.code))) {
@@ -24,7 +36,9 @@ async function sendCommandError(interaction, content) {
     if (interaction.replied) return await interaction.followUp(response);
     return await interaction.reply(response);
   } catch (responseError) {
-    if (Number(responseError?.code) !== 10008) console.error('[FyxBot] Réponse d’erreur impossible :', responseError);
+    if (Number(responseError?.code) !== 10008) {
+      logInteractionError(responseError, '[FyxBot] Réponse d’erreur impossible.', interaction);
+    }
     return null;
   }
 }
@@ -41,10 +55,13 @@ module.exports = {
       try {
         await handleRulesButton(interaction);
       } catch (error) {
-        console.error('[FyxBot] Erreur d’acceptation du règlement :', error);
+        logInteractionError(error, '[FyxBot] Erreur d’acceptation du règlement.', interaction);
         const response = { content: 'Une erreur est survenue pendant la validation du règlement.', flags: MessageFlags.Ephemeral };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(response).catch(console.error);
-        else await interaction.reply(response).catch(console.error);
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse règlement impossible.', interaction));
+        } else {
+          await interaction.reply(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse règlement impossible.', interaction));
+        }
       }
       scheduleCleanup();
       return;
@@ -54,10 +71,13 @@ module.exports = {
       try {
         await handleRoleButton(interaction);
       } catch (error) {
-        console.error(`[FyxBot] Erreur de rôle (${interaction.customId}) :`, error);
+        logInteractionError(error, '[FyxBot] Erreur de rôle.', interaction);
         const response = { content: 'Une erreur est survenue pendant la modification du rôle.', flags: MessageFlags.Ephemeral };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(response).catch(console.error);
-        else await interaction.reply(response).catch(console.error);
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse rôle impossible.', interaction));
+        } else {
+          await interaction.reply(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse rôle impossible.', interaction));
+        }
       }
       scheduleCleanup();
       return;
@@ -67,10 +87,13 @@ module.exports = {
       try {
         await handleTicketButton(interaction);
       } catch (error) {
-        console.error(`[FyxBot] Erreur de ticket (${interaction.customId}) :`, error);
+        logInteractionError(error, '[FyxBot] Erreur de ticket.', interaction);
         const response = { content: 'Une erreur est survenue avec ce ticket.', flags: MessageFlags.Ephemeral };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(response).catch(console.error);
-        else await interaction.reply(response).catch(console.error);
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse ticket impossible.', interaction));
+        } else {
+          await interaction.reply(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse ticket impossible.', interaction));
+        }
       }
       scheduleCleanup();
       return;
@@ -80,10 +103,13 @@ module.exports = {
       try {
         await handleGiveawayButton(interaction);
       } catch (error) {
-        console.error(`[FyxBot] Erreur de concours (${interaction.customId}) :`, error);
+        logInteractionError(error, '[FyxBot] Erreur de concours.', interaction);
         const response = { content: 'Une erreur est survenue avec ce concours.', flags: MessageFlags.Ephemeral };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(response).catch(console.error);
-        else await interaction.reply(response).catch(console.error);
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse concours impossible.', interaction));
+        } else {
+          await interaction.reply(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse concours impossible.', interaction));
+        }
       }
       scheduleCleanup();
       return;
@@ -93,10 +119,13 @@ module.exports = {
       try {
         await handlePremiumButton(interaction);
       } catch (error) {
-        console.error('[FyxBot] Erreur d’activation Premium :', error);
+        logInteractionError(error, '[FyxBot] Erreur d’activation Premium.', interaction);
         const response = { content: error.userMessage || 'L’activation Premium est momentanément indisponible.', flags: MessageFlags.Ephemeral };
-        if (interaction.replied || interaction.deferred) await interaction.followUp(response).catch(console.error);
-        else await interaction.reply(response).catch(console.error);
+        if (interaction.replied || interaction.deferred) {
+          await interaction.followUp(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse Premium impossible.', interaction));
+        } else {
+          await interaction.reply(response).catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse Premium impossible.', interaction));
+        }
       }
       scheduleCleanup();
       return;
@@ -106,7 +135,7 @@ module.exports = {
 
     const command = interaction.client.commands.get(interaction.commandName);
     if (!command) {
-      console.warn(`[FyxBot] Commande inconnue : ${interaction.commandName}`);
+      logger.warn({ commandName: interaction.commandName, guildId: interaction.guildId }, '[FyxBot] Commande inconnue.');
       return;
     }
     const subcommand = interaction.options.getSubcommand?.(false) || null;
@@ -125,7 +154,7 @@ module.exports = {
       if (!preserveReply) scheduleCleanup(command.cleanupDelayMs);
     } catch (error) {
       recordCommandUsage(interaction.guildId, interaction.commandName, false);
-      console.error(`[FyxBot] Erreur dans /${interaction.commandName} :`, error);
+      logInteractionError(error, '[FyxBot] Erreur pendant l’exécution d’une commande.', interaction);
       await sendCommandError(interaction, commandErrorMessage(error));
       scheduleCleanup();
     }

@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const { getConfig } = require('../src/config');

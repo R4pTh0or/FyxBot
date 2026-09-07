@@ -54,6 +54,8 @@ test('mesure l’activation sans attribuer rétroactivement la cohorte 24 heures
   assert.equal(stats.activatedWithin24h, 1);
   assert.equal(stats.activation24hRate, 100);
   assert.equal(stats.activeGuilds30d, 2);
+  assert.equal(stats.stalledGuilds7d, 0);
+  assert.deepEqual(stats.completionDistribution.map((bucket) => bucket.guilds), [0, 2, 0]);
   assert.equal(stats.steps.find((step) => step.key === 'rules').completedGuilds, 1);
   assert.deepEqual(JSON.parse(targetDatabase.prepare("SELECT step_keys FROM guild_activation_progress WHERE guild_id = 'new'").get().step_keys), [
     'structure', 'logs', 'welcome', 'security',
@@ -95,4 +97,14 @@ test('classe comme historique un serveur observé pour la première fois après 
   targetDatabase.prepare("INSERT INTO guild_installations VALUES ('boundary', 'Historique', 5, '2026-08-24T10:00:00.000Z', '2026-08-25T10:00:00.000Z', NULL)").run();
   const row = ensureActivationTracking('boundary', { targetDatabase, now: '2026-08-25T10:00:00.000Z' });
   assert.equal(row.baseline, 1);
+});
+
+test('identifie les parcours incomplets sans activité depuis sept jours', () => {
+  const targetDatabase = createDatabase();
+  targetDatabase.prepare("INSERT INTO guild_installations VALUES ('stalled', 'En pause', 5, '2026-08-01T10:00:00.000Z', '2026-08-01T10:00:00.000Z', NULL)").run();
+  ensureActivationTracking('stalled', { targetDatabase, now: '2026-08-02T10:00:00.000Z' });
+  recordActivationProgress('stalled', progress(['structure']), { targetDatabase, now: '2026-08-02T11:00:00.000Z' });
+  const stats = getActivationStats(['stalled'], { targetDatabase, now: '2026-08-20T12:00:00.000Z' });
+  assert.equal(stats.stalledGuilds7d, 1);
+  assert.deepEqual(stats.completionDistribution.map((bucket) => bucket.guilds), [1, 0, 0]);
 });

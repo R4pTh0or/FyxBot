@@ -1,5 +1,6 @@
 const { getSocialConfig, setSocialConfig } = require('../database/socialStore');
 const { socialNotificationPayload } = require('./socialNotifications');
+const logger = require('./logger').logger.child({ component: 'social-automation' });
 
 const SUPPORTED_AUTOMATIC_PLATFORMS = Object.freeze(['youtube', 'twitch']);
 let twitchTokenCache = null;
@@ -48,6 +49,36 @@ function normalizeSocialSource({ platform, identifier, label = '' }) {
     enabled: true,
     createdAt: new Date().toISOString(),
   };
+}
+
+function replaceSocialSource(sources, sourceId, input, now = new Date()) {
+  const items = Array.isArray(sources) ? [...sources] : [];
+  const index = items.findIndex((source) => source.id === sourceId);
+  if (index < 0) throw new Error('Source sociale introuvable.');
+
+  const current = items[index];
+  const normalized = normalizeSocialSource(input);
+  if (items.some((source, sourceIndex) => sourceIndex !== index && source.id === normalized.id)) {
+    throw new Error('Cette source est déjà surveillée.');
+  }
+
+  const identityChanged = current.id !== normalized.id;
+  const updatedAt = now.toISOString();
+  const updated = identityChanged
+    ? {
+        ...normalized,
+        createdAt: current.createdAt || normalized.createdAt,
+        updatedAt,
+        status: 'pending',
+      }
+    : {
+        ...current,
+        ...normalized,
+        createdAt: current.createdAt || normalized.createdAt,
+        updatedAt,
+      };
+  items[index] = updated;
+  return { sources: items, source: updated, identityChanged };
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 10_000) {
@@ -150,7 +181,7 @@ async function checkGuildSocialNotifications(guild) {
     } catch (error) {
       updatedSources.push({ ...source, status: 'error', lastCheckedAt: new Date().toISOString(), lastError: String(error.message).slice(0, 200) });
       changed = true;
-      console.warn(`[FyxBot] Source sociale ${source.id} sur ${guild.id} : ${error.message}`);
+      logger.warn({ err: error, guildId: guild.id, sourceId: source.id }, '[FyxBot] Vérification d’une source sociale impossible.');
     }
   }
   if (changed) await setSocialConfig(guild.id, { ...config, sources: updatedSources, updatedAt: new Date().toISOString() });
@@ -161,7 +192,7 @@ async function checkSocialNotifications(client) {
   const results = [];
   for (const guild of client.guilds.cache.values()) {
     try { results.push(await checkGuildSocialNotifications(guild)); }
-    catch (error) { console.error(`[FyxBot] Automatisation sociale sur ${guild.id} :`, error); }
+    catch (error) { logger.error({ err: error, guildId: guild.id }, '[FyxBot] Automatisation sociale indisponible.'); }
   }
   return results;
 }
@@ -188,5 +219,6 @@ module.exports = {
   latestSocialItem,
   normalizeSocialSource,
   parseYouTubeFeed,
+  replaceSocialSource,
   startSocialNotificationScheduler,
 };

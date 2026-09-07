@@ -11,6 +11,7 @@ const {
 } = require('@aws-sdk/client-s3');
 const { database } = require('../database/database');
 const { getDataDirectory } = require('../database/dataDirectory');
+const appLogger = require('./logger').logger.child({ component: 'external-backup' });
 
 const BACKUP_MAGIC = 'FYXBOT-BACKUP-V1';
 const LEGACY_BACKUP_MAGIC = 'NEXORA-BACKUP-V1';
@@ -252,7 +253,7 @@ async function writeBackupState(stateFile, result) {
   })}\n`, { encoding: 'utf8', mode: 0o600 });
 }
 
-function startExternalBackupScheduler({ logger = console } = {}) {
+function startExternalBackupScheduler({ logger = appLogger } = {}) {
   let config;
   try {
     config = getExternalBackupConfig();

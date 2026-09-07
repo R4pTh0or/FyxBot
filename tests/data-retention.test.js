@@ -10,6 +10,7 @@ function createDatabase() {
     CREATE TABLE warnings (id TEXT, guild_id TEXT, user_id TEXT, moderator_id TEXT, reason TEXT, created_at TEXT);
     CREATE TABLE dashboard_sessions (token_hash TEXT PRIMARY KEY, value TEXT, expires_at INTEGER);
     CREATE TABLE audit_logs (id INTEGER, guild_id TEXT, title TEXT, description TEXT, color INTEGER, created_at TEXT);
+    CREATE TABLE change_history (id TEXT, guild_id TEXT);
     CREATE TABLE suggestions (id TEXT, guild_id TEXT, channel_id TEXT, message_id TEXT, author_id TEXT, author_name TEXT, anonymous INTEGER, idea TEXT, status TEXT, reviewed_by TEXT, reviewed_at TEXT, created_at TEXT);
     CREATE TABLE guild_installations (guild_id TEXT PRIMARY KEY, guild_name TEXT, member_count INTEGER, first_seen_at TEXT, last_seen_at TEXT, removed_at TEXT);
     CREATE TABLE command_usage (day TEXT, guild_id TEXT, command_name TEXT, success_count INTEGER, failure_count INTEGER);
@@ -31,6 +32,7 @@ test('supprime les données du serveur et conserve uniquement une statistique an
   targetDatabase.prepare("INSERT INTO configurations VALUES (?, 'birthdays', '{}', '2026-08-24')").run(guildId);
   targetDatabase.prepare("INSERT INTO warnings VALUES ('warn', ?, 'user', 'mod', 'raison', '2026-08-24')").run(guildId);
   targetDatabase.prepare("INSERT INTO audit_logs VALUES (1, ?, 'titre', 'description', 1, '2026-08-24')").run(guildId);
+  targetDatabase.prepare("INSERT INTO change_history VALUES ('change', ?)").run(guildId);
   targetDatabase.prepare("INSERT INTO suggestions VALUES ('idea', ?, 'channel', 'message', 'user', 'User', 0, 'idée', 'pending', NULL, NULL, '2026-08-24')").run(guildId);
   targetDatabase.prepare("INSERT INTO guild_installations VALUES (?, 'Serveur privé', 42, '2026-08-01', '2026-08-24', NULL)").run(guildId);
   targetDatabase.prepare("INSERT INTO command_usage VALUES ('2026-08-24', ?, 'ping', 1, 0)").run(guildId);
@@ -57,7 +59,7 @@ test('supprime les données du serveur et conserve uniquement une statistique an
     deleteBackups: async (id) => { calls.push(['backups', id]); return 2; },
   });
 
-  for (const table of ['configurations', 'warnings', 'audit_logs', 'suggestions', 'command_usage', 'guild_activation_progress', 'premium_entitlements', 'premium_user_guilds']) {
+  for (const table of ['configurations', 'warnings', 'audit_logs', 'change_history', 'suggestions', 'command_usage', 'guild_activation_progress', 'premium_entitlements', 'premium_user_guilds']) {
     assert.equal(targetDatabase.prepare(`SELECT COUNT(*) AS total FROM ${table} WHERE guild_id = ?`).get(guildId).total, 0);
   }
   assert.equal(targetDatabase.prepare('SELECT COUNT(*) AS total FROM community_giveaways WHERE guild_id = ?').get(guildId).total, 0);

@@ -15,6 +15,7 @@ function saveServerSetupDraft(guildId, blueprint) {
     description: blueprint.description,
     draftBlueprint: blueprint,
     draftUpdatedAt: new Date().toISOString(),
+    previewHiddenAt: null,
   });
 }
 
@@ -26,20 +27,38 @@ function activateServerSetupBlueprint(guildId, blueprint) {
     draftBlueprint: blueprint,
     activeBlueprint: blueprint,
     appliedAt: new Date().toISOString(),
+    previewHiddenAt: null,
   });
+}
+
+function withoutServerSetupPreview(current = {}, now = new Date()) {
+  const { draftBlueprint, draftUpdatedAt, description, ...preserved } = current;
+  return {
+    ...preserved,
+    previewHiddenAt: now.toISOString(),
+  };
+}
+
+function deleteServerSetupPreview(guildId) {
+  const current = getServerSetupConfig(guildId) || {};
+  const hadPreview = Boolean(current.draftBlueprint || current.activeBlueprint);
+  setServerSetupConfig(guildId, withoutServerSetupPreview(current));
+  return hadPreview;
 }
 
 function getServerSetupBlueprint(guildId, options = {}) {
   const config = getServerSetupConfig(guildId) || {};
-  return options.activeOnly
-    ? config.activeBlueprint || null
-    : config.draftBlueprint || config.activeBlueprint || null;
+  if (options.activeOnly) return config.activeBlueprint || null;
+  if (config.previewHiddenAt && !config.draftBlueprint) return null;
+  return config.draftBlueprint || config.activeBlueprint || null;
 }
 
 module.exports = {
   activateServerSetupBlueprint,
+  deleteServerSetupPreview,
   getServerSetupBlueprint,
   getServerSetupConfig,
   saveServerSetupDraft,
   setServerSetupConfig,
+  withoutServerSetupPreview,
 };

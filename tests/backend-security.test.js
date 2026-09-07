@@ -3,14 +3,18 @@ const { createHash } = require('node:crypto');
 const test = require('node:test');
 const { PermissionFlagsBits } = require('discord.js');
 const {
+  contentDeleteError,
+  deleteTrackedDiscordMessage,
   getDashboardState,
   isLoopbackHost,
   isRequestOriginAllowed,
   messagePublishError,
+  normalizeBotNickname,
   panelErrorResponse,
   requireGuildCapability,
   requireRecentAuthentication,
   revalidateManageableGuildIds,
+  updateGuildBotNickname,
 } = require('../src/services/dashboardServer');
 const { csrfTokenMatches, getSession, settings, startLogin } = require('../src/services/dashboardAuth');
 const { database } = require('../src/database/database');
@@ -345,6 +349,65 @@ test('traduit les refus Discord du constructeur de messages', () => {
   assert.match(messagePublishError(Object.assign(new Error('Missing Access'), { code: 50001 })).message, /voir ce salon/);
   assert.match(messagePublishError(Object.assign(new Error('Invalid Form Body'), { code: 50035 })).message, /format du message/);
   assert.match(messagePublishError(new Error('socket interne indisponible')).message, /Réessayez/);
+});
+
+test('explique précisément les refus Discord lors du retrait d’un contenu', () => {
+  assert.match(contentDeleteError(Object.assign(new Error('Missing Access'), { code: 50001 })).message, /contenant ce message/);
+  assert.match(contentDeleteError(Object.assign(new Error('Missing Permissions'), { code: 50013 })).message, /Gérer les messages/);
+  assert.match(contentDeleteError(new Error('socket interne indisponible')).message, /retirer ce contenu/);
+});
+
+test('normalise le surnom FyxBot sans dépasser la limite Discord', () => {
+  assert.equal(normalizeBotNickname('  Assistant   Minecraft  '), 'Assistant Minecraft');
+  assert.equal(normalizeBotNickname(''), '');
+  assert.throws(() => normalizeBotNickname('x'.repeat(33)), /32 caractères/);
+});
+
+test('modifie uniquement le surnom du bot sur le serveur ciblé', async () => {
+  let applied = null;
+  const member = {
+    nickname: null,
+    permissions: { has: (permission) => permission === PermissionFlagsBits.ChangeNickname },
+    setNickname: async (nickname) => { applied = nickname; member.nickname = nickname; },
+  };
+  const result = await updateGuildBotNickname({ members: { me: member } }, 'Assistant Minecraft');
+  assert.deepEqual(result, { changed: true, nickname: 'Assistant Minecraft' });
+  assert.equal(applied, 'Assistant Minecraft');
+});
+
+test('refuse la personnalisation si FyxBot ne peut pas changer son pseudo', async () => {
+  const member = {
+    nickname: null,
+    permissions: { has: () => false },
+    setNickname: async () => assert.fail('Discord ne doit pas être appelé'),
+  };
+  await assert.rejects(updateGuildBotNickname({ members: { me: member } }, 'Assistant'), /Changer de pseudo/);
+});
+
+test('supprime uniquement un message Discord publié par FyxBot', async () => {
+  let deleted = false;
+  const client = {
+    user: { id: 'fyxbot' },
+    channels: { fetch: async () => ({
+      guildId: 'guild',
+      isTextBased: () => true,
+      messages: { fetch: async () => ({ author: { id: 'fyxbot' }, delete: async () => { deleted = true; } }) },
+    }) },
+  };
+  assert.equal(await deleteTrackedDiscordMessage(client, 'guild', 'channel', 'message'), true);
+  assert.equal(deleted, true);
+});
+
+test('refuse de supprimer un message Discord qui n’appartient pas à FyxBot', async () => {
+  const client = {
+    user: { id: 'fyxbot' },
+    channels: { fetch: async () => ({
+      guildId: 'guild',
+      isTextBased: () => true,
+      messages: { fetch: async () => ({ author: { id: 'member' }, delete: async () => {} }) },
+    }) },
+  };
+  await assert.rejects(deleteTrackedDiscordMessage(client, 'guild', 'channel', 'message'), /n’est pas l’auteur/);
 });
 
 test('masque les erreurs internes en production avec une référence de diagnostic', () => {

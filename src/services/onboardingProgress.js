@@ -20,12 +20,16 @@ function buildOnboardingProgress({ setupBlueprint = null, config = {}, securityR
   };
   const steps = STEP_DEFINITIONS.map((step) => ({ ...step, complete: completed[step.key] }));
   const completedCount = steps.filter((step) => step.complete).length;
+  const percent = Math.round((completedCount / steps.length) * 100);
+  const recommendedStep = steps.find((step) => !step.complete) || null;
   return {
     completedCount,
     totalCount: steps.length,
-    percent: Math.round((completedCount / steps.length) * 100),
+    percent,
     complete: completedCount === steps.length,
     steps,
+    recommendedStep,
+    healthLevel: percent === 100 ? 'ready' : percent >= 60 ? 'progressing' : percent >= 30 ? 'starting' : 'new',
   };
 }
 

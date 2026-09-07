@@ -38,6 +38,7 @@ function purgeGuildDatabaseData(guildId, {
     counts.configurations = activeDatabase.prepare('DELETE FROM configurations WHERE guild_id = ?').run(guildId).changes;
     counts.warnings = activeDatabase.prepare('DELETE FROM warnings WHERE guild_id = ?').run(guildId).changes;
     counts.auditLogs = activeDatabase.prepare('DELETE FROM audit_logs WHERE guild_id = ?').run(guildId).changes;
+    counts.changeHistory = activeDatabase.prepare('DELETE FROM change_history WHERE guild_id = ?').run(guildId).changes;
     counts.suggestions = activeDatabase.prepare('DELETE FROM suggestions WHERE guild_id = ?').run(guildId).changes;
     counts.commandUsage = activeDatabase.prepare('DELETE FROM command_usage WHERE guild_id = ?').run(guildId).changes;
     counts.activationProgress = activeDatabase.prepare('DELETE FROM guild_activation_progress WHERE guild_id = ?').run(guildId).changes;

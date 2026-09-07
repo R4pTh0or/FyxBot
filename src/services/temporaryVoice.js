@@ -1,5 +1,6 @@
 const { ChannelType, PermissionFlagsBits } = require('discord.js');
 const { getTemporaryVoiceConfig, setTemporaryVoiceConfig } = require('../database/temporaryVoiceStore');
+const logger = require('./logger').logger.child({ component: 'temporary-voice' });
 
 function sanitizeRoomName(value) {
   return String(value || 'Salon temporaire')
@@ -43,7 +44,11 @@ async function deleteRoomIfEmpty(guild, channelId, config) {
   if (!room) return config;
   const channel = await guild.channels.fetch(channelId).catch(() => null);
   if (channel?.members?.size) return config;
-  if (channel) await channel.delete('Salon vocal temporaire FyxBot vide').catch(console.error);
+  if (channel) {
+    await channel.delete('Salon vocal temporaire FyxBot vide').catch((error) => {
+      logger.error({ err: error, channelId, guildId: guild.id }, '[FyxBot] Suppression du salon vocal temporaire impossible.');
+    });
+  }
   const rooms = { ...(config.rooms || {}) };
   delete rooms[channelId];
   return saveVoiceConfig(guild.id, { ...config, rooms });

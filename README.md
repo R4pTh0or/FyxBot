@@ -35,6 +35,7 @@ Pour préparer une version, ajoutez-la au manifeste puis alignez les numéros de
 ## Prérequis
 
 - Node.js 22.12 ou plus récent
+- pnpm 11 ou plus récent
 - Une application créée dans le [Portail développeur Discord](https://discord.com/developers/applications)
 - Un bot ajouté à cette application et invité sur votre serveur avec les scopes `bot` et `applications.commands`
 
@@ -43,7 +44,7 @@ Pour préparer une version, ajoutez-la au manifeste puis alignez les numéros de
 1. Installez les dépendances :
 
    ```bash
-   npm install
+   pnpm install
    ```
 
 2. Copiez `.env.example` vers `.env`, puis renseignez :
@@ -55,22 +56,36 @@ Pour préparer une version, ajoutez-la au manifeste puis alignez les numéros de
 3. Publiez les commandes slash :
 
    ```bash
-   npm run deploy
+   pnpm run deploy
    ```
 
 4. Démarrez FyxBot :
 
    ```bash
-   npm start
+   pnpm start
    ```
 
 Pour relancer automatiquement le bot après une modification :
 
 ```bash
-npm run dev
+pnpm run dev
 ```
 
 > Ne partagez et ne versionnez jamais le fichier `.env` ni le jeton du bot. Si le jeton est exposé, régénérez-le immédiatement dans le portail Discord.
+
+## Vérifications dans VS Code
+
+Le dossier de développement contient des tâches prêtes à l’emploi. Dans VS Code,
+ouvrez **Terminal > Exécuter la tâche**, puis choisissez :
+
+- `FyxBot: Vérifier le bot` pour la syntaxe, le typage progressif et tous les tests ;
+- `FyxBot: Vérifier le panel` pour le lint ;
+- `FyxBot: Compiler le panel` avant un aperçu ou un déploiement.
+
+La configuration locale indique également à VS Code où trouver Node et pnpm sur
+cet ordinateur. Le bot utilise Pino : les journaux restent lisibles en local et
+sont émis en JSON structuré sur Railway. `FYXBOT_LOG_LEVEL` permet d’ajuster leur
+niveau sans modifier le code.
 
 ## Simulation de 50 utilisateurs
 
@@ -80,13 +95,13 @@ la santé du bot. Il n’utilise pas de faux comptes Discord et ne modifie aucun
 serveur, ticket, rôle ou réglage.
 
 ```bash
-npm run simulate:50
+pnpm run simulate:50
 ```
 
 Pour lancer le scénario renforcé avec 200 utilisateurs simultanés :
 
 ```bash
-npm run simulate:200
+pnpm run simulate:200
 ```
 
 Le rapport affiche les réussites, les erreurs, la latence médiane, la latence
@@ -148,7 +163,7 @@ module.exports = {
 };
 ```
 
-Relancez ensuite `npm run deploy` pour publier la nouvelle commande.
+Relancez ensuite `pnpm run deploy` pour publier la nouvelle commande.
 
 ## Déploiement des commandes
 

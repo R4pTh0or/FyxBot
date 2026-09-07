@@ -192,6 +192,75 @@ test('conçoit librement une structure adaptée et formate tous les salons avec 
   assert.throws(() => buildAdaptiveBlueprint('trop court'), /au moins 20 caractères/);
 });
 
+test('compose un serveur Minecraft et Twitch sans dupliquer les éléments', () => {
+  const blueprint = buildAdaptiveBlueprint(
+    'Communauté Minecraft survie Java et Bedrock avec économie, factions, chaîne Twitch, lives, vidéos, VIP et support par tickets.',
+  );
+  const roleKeys = blueprint.roles.map((item) => item.key);
+  const categoryKeys = blueprint.categories.map((item) => item.key);
+  const channelKeys = blueprint.channels.map((item) => item.key);
+
+  assert.equal(blueprint.version, 2);
+  assert.ok(['javaPlayer', 'bedrockPlayer', 'builder', 'creator', 'twitchModerator', 'vip'].every((key) => roleKeys.includes(key)));
+  assert.ok(['gameServer', 'content', 'support'].every((key) => categoryKeys.includes(key)));
+  assert.ok([
+    'connectionGuide',
+    'gameGuide',
+    'gameTrade',
+    'factionRecruitment',
+    'creatorSchedule',
+    'liveNotifications',
+    'backstage',
+  ].every((key) => channelKeys.includes(key)));
+  assert.equal(blueprint.channels.find((item) => item.key === 'backstage').permissionProfile, 'staffOnly');
+  assert.equal(new Set(roleKeys).size, roleKeys.length);
+  assert.equal(new Set(categoryKeys).size, categoryKeys.length);
+  assert.equal(new Set(channelKeys).size, channelKeys.length);
+  assert.ok(blueprint.explanations.some((item) => item.categoryKey === 'gameServer' && item.reason.includes('Minecraft')));
+});
+
+test('sépare correctement les espaces RP, HRP et la variante FiveM', () => {
+  const blueprint = buildAdaptiveBlueprint(
+    'Serveur FiveM RP avec whitelist, lore, fiches de personnages, emplois en ville, scènes et signalement de bugs.',
+  );
+  const channel = (key) => blueprint.channels.find((item) => item.key === key);
+
+  assert.ok(blueprint.detectedNeeds.includes('roleplay'));
+  assert.ok(blueprint.detectedNeeds.includes('roleplay FiveM et whitelist'));
+  assert.ok(['gameMaster', 'character', 'observer'].every((key) => blueprint.roles.some((item) => item.key === key)));
+  assert.equal(channel('rpGuide').category, 'roleplayInfo');
+  assert.equal(channel('oocGeneral').category, 'roleplayOoc');
+  assert.equal(channel('scenes').category, 'roleplay');
+  assert.equal(channel('characterValidation').permissionProfile, 'staffOnly');
+  assert.equal(channel('whitelist').category, 'city');
+  assert.equal(channel('rpServerStatus').permissionProfile, 'memberReadOnly');
+});
+
+test('adapte une campagne de jeu de rôle sur table avec calendrier, dés et vocal', () => {
+  const blueprint = buildAdaptiveBlueprint(
+    'Communauté Donjons et Dragons pour une campagne JDR avec calendrier des sessions, lancers de dés et table vocale.',
+  );
+
+  assert.ok(blueprint.detectedNeeds.includes('campagne de jeu de rôle sur table'));
+  assert.ok(blueprint.categories.some((item) => item.key === 'campaign'));
+  assert.ok(blueprint.channels.some((item) => item.key === 'sessions' && item.permissionProfile === 'memberReadOnly'));
+  assert.ok(blueprint.channels.some((item) => item.key === 'diceRolls'));
+  assert.ok(blueprint.channels.some((item) => item.key === 'tabletopVoice' && item.type === 'voice'));
+});
+
+test('enrichit une communauté générale sans ouvrir les catégories privées à everyone', () => {
+  const blueprint = buildAdaptiveBlueprint(
+    'Communauté conviviale autour de nos passions avec présentations, photos, sondages et discussion vocale.',
+  );
+
+  assert.ok(['introductions', 'communityMedia', 'polls', 'communityVoice']
+    .every((key) => blueprint.channels.some((item) => item.key === key)));
+  assert.equal(blueprint.categories.find((item) => item.key === 'welcome').permissionProfile, 'publicReadOnly');
+  assert.ok(blueprint.categories.filter((item) => item.key !== 'welcome')
+    .every((item) => ['memberCommunity', 'memberReadOnly', 'staffOnly'].includes(item.permissionProfile)));
+  assert.ok(blueprint.channels.every((item) => /^[^・]+・.+/.test(item.name)));
+});
+
 test('remappe les identifiants de configuration lors d’un retour arrière', () => {
   const restored = remapConfigurationIds({ channelId: 'old-channel', nested: ['old-role', 'other'] }, new Map([
     ['old-channel', 'new-channel'],

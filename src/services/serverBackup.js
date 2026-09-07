@@ -219,6 +219,24 @@ function remapPermissionOverwrites(overwrites, guild, roleIdMap) {
   });
 }
 
+function restorationPermissionOverwrites(overwrites, guild, roleIdMap) {
+  const remapped = remapPermissionOverwrites(overwrites, guild, roleIdMap);
+  const botMemberId = guild.members.me.id;
+  const requiredPermissions = PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ManageChannels;
+  const botOverwrite = remapped.find((overwrite) => overwrite.id === botMemberId && Number(overwrite.type) === 1);
+  if (botOverwrite) {
+    botOverwrite.allow |= requiredPermissions;
+    botOverwrite.deny &= ~requiredPermissions;
+    return remapped;
+  }
+  return [...remapped, {
+    id: botMemberId,
+    type: 1,
+    allow: requiredPermissions,
+    deny: 0n,
+  }];
+}
+
 function remapConfigurationIds(value, idMap) {
   if (typeof value === 'string') return idMap.get(value) || value;
   if (Array.isArray(value)) return value.map((item) => remapConfigurationIds(item, idMap));
@@ -233,7 +251,10 @@ function restorableChannelOptions(savedChannel, guild, roleIdMap, parentId) {
     name: savedChannel.name,
     type: savedChannel.type,
     parent: parentId || undefined,
-    permissionOverwrites: remapPermissionOverwrites(savedChannel.permissionOverwrites, guild, roleIdMap),
+    // Le bot conserve provisoirement l'accès pendant toute la reconstruction.
+    // Les permissions exactes de la sauvegarde sont réappliquées une fois tous
+    // les salons créés, afin qu'une catégorie privée ne bloque pas la suite.
+    permissionOverwrites: restorationPermissionOverwrites(savedChannel.permissionOverwrites, guild, roleIdMap),
     reason: 'Restauration d’une sauvegarde FyxBot',
   };
   if ([ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum].includes(savedChannel.type)) {
@@ -312,12 +333,14 @@ async function restoreServer(guild, filename) {
   }
 
   const channelIdMap = new Map();
+  const restoredChannels = [];
   const savedCategories = (snapshot.channels || [])
     .filter((channel) => channel.type === ChannelType.GuildCategory)
     .sort((left, right) => left.position - right.position);
   for (const savedCategory of savedCategories) {
     const createdCategory = await guild.channels.create(restorableChannelOptions(savedCategory, guild, roleIdMap));
     channelIdMap.set(savedCategory.id, createdCategory.id);
+    restoredChannels.push({ saved: savedCategory, created: createdCategory });
     await createdCategory.setPosition(savedCategory.position).catch(() => null);
   }
   const savedChannels = (snapshot.channels || [])
@@ -327,7 +350,20 @@ async function restoreServer(guild, filename) {
     const parentId = savedChannel.parentId ? channelIdMap.get(savedChannel.parentId) : null;
     const createdChannel = await guild.channels.create(restorableChannelOptions(savedChannel, guild, roleIdMap, parentId));
     channelIdMap.set(savedChannel.id, createdChannel.id);
+    restoredChannels.push({ saved: savedChannel, created: createdChannel });
     await createdChannel.setPosition(savedChannel.position).catch(() => null);
+  }
+
+  const permissionsLast = restoredChannels.sort((left, right) => {
+    const leftIsCategory = left.saved.type === ChannelType.GuildCategory ? 1 : 0;
+    const rightIsCategory = right.saved.type === ChannelType.GuildCategory ? 1 : 0;
+    return leftIsCategory - rightIsCategory;
+  });
+  for (const { saved, created } of permissionsLast) {
+    await created.permissionOverwrites.set(
+      remapPermissionOverwrites(saved.permissionOverwrites, guild, roleIdMap),
+      'Permissions restaurées par FyxBot',
+    );
   }
 
   if (snapshot.version >= 2 && Array.isArray(snapshot.configurations)) {
@@ -373,5 +409,6 @@ module.exports = {
   loadServerBackup,
   migrateLegacyLocalBackups,
   remapConfigurationIds,
+  restorationPermissionOverwrites,
   restoreServer,
 };

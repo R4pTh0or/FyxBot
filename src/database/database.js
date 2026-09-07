@@ -22,6 +22,23 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS dashboard_oauth_states (state_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, color INTEGER NOT NULL, created_at TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS audit_logs_guild ON audit_logs(guild_id, id DESC);
+  CREATE TABLE IF NOT EXISTS change_history (
+    id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    actor_name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '{}',
+    backup_file TEXT,
+    reversible INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'applied',
+    created_at TEXT NOT NULL,
+    rolled_back_at TEXT,
+    rolled_back_by TEXT
+  );
+  CREATE INDEX IF NOT EXISTS change_history_guild ON change_history(guild_id, created_at DESC);
   CREATE TABLE IF NOT EXISTS suggestions (
     id TEXT PRIMARY KEY,
     guild_id TEXT NOT NULL,

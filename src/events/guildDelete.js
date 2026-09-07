@@ -1,5 +1,6 @@
 const { Events } = require('discord.js');
 const { purgeGuildData } = require('../services/dataRetention');
+const logger = require('../services/logger').logger.child({ component: 'guild-lifecycle' });
 
 module.exports = {
   name: Events.GuildDelete,
@@ -10,9 +11,9 @@ module.exports = {
         + result.suggestions + result.commandUsage + result.activationProgress
         + result.premiumEntitlements + result.premiumGuildLinks
         + result.warningFileEntries + result.localBackups;
-      console.log(`[FyxBot] Retiré de ${guild.name}. ${removed} donnée(s) opérationnelle(s) supprimée(s), statistiques anonymisées.`);
+      logger.info({ guildId: guild.id, guildName: guild.name, removed }, '[FyxBot] Bot retiré du serveur, données opérationnelles purgées.');
     } catch (error) {
-      console.error(`[FyxBot] Échec de la purge des données de ${guild.id} :`, error);
+      logger.error({ err: error, guildId: guild.id }, '[FyxBot] Échec de la purge des données du serveur.');
     }
   },
 };
