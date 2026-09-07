@@ -1,0 +1,14 @@
+.env
+.env.*
+!.env.example
+node_modules/
+dashboard/node_modules/
+dashboard/dist/
+dashboard/.next/
+data/
+*.log
+coverage/
+.git/
+.tools/
+.vscode/
+.idea/

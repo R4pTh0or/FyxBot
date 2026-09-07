@@ -1,0 +1,38 @@
+{
+  "name": "fyxbot-discord-bot",
+  "version": "1.5.0",
+  "description": "Bot Discord multifonction et modulaire pour FyxBot.",
+  "main": "src/index.js",
+  "type": "commonjs",
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node --watch src/index.js",
+    "deploy": "node src/deploy-commands.js",
+    "deploy:global": "node src/deploy-commands.js --global",
+    "deploy:global:no-premium": "node src/deploy-commands.js --global --exclude-premium",
+    "deploy:clear-guild": "node src/deploy-commands.js --clear-guild",
+    "check": "node --check src/index.js && node --check src/deploy-commands.js",
+    "test": "node --test tests/activation-analytics.test.js tests/backend-security.test.js tests/channel-creation.test.js tests/command-access.test.js tests/command-deployment.test.js tests/community-features.test.js tests/community-giveaways.test.js tests/data-retention.test.js tests/dashboard-auth-cleanup.test.js tests/external-backup.test.js tests/local-backup-security.test.js tests/monitoring.test.js tests/permission-migration.test.js tests/premium-entitlements.test.js tests/premium-founder-access.test.js tests/release-manifest.test.js tests/server-setup.test.js tests/support-management.test.js tests/transcript-security.test.js",
+    "monitor:health": "node scripts/monitor-health.js",
+    "simulate:50": "node scripts/load-simulation.js --users 50",
+    "simulate:200": "node scripts/load-simulation.js --users 200",
+    "test:discord-setup": "node scripts/check-server-setup.js --guild-name \"FyxBot Développement\"",
+    "test:discord-120": "node scripts/test-release-120.js --guild-name \"FyxBot Développement\" --confirm PUBLIER_APERCUS"
+  },
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "keywords": [
+    "discord",
+    "discord-bot",
+    "discord.js",
+    "fyxbot"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1111.0",
+    "discord.js": "^14.22.1",
+    "dotenv": "^17.2.3"
+  }
+}

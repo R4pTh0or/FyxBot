@@ -1,0 +1,262 @@
+{
+  "schemaVersion": 1,
+  "product": "FyxBot",
+  "currentVersion": "1.5.0",
+  "status": "available",
+  "statusLabel": "Disponible",
+  "releasedAt": "2026-08-28T00:00:00+02:00",
+  "changelogPath": "/changelog",
+  "releases": [
+    {
+      "version": "1.5.0",
+      "dateLabel": "28 août 2026",
+      "releasedAt": "2026-08-28T00:00:00+02:00",
+      "status": "available",
+      "statusLabel": "Disponible",
+      "title": "FyxBot Premium ouvre son accès Fondateur",
+      "intro": "Les 100 premiers utilisateurs Discord peuvent désormais découvrir FyxBot Premium pendant trente jours, sans carte bancaire ni renouvellement automatique.",
+      "changes": [
+        [
+          "💎",
+          "100 accès Fondateur",
+          "L’offre est comptée par utilisateur Discord et non par serveur."
+        ],
+        [
+          "🎁",
+          "30 jours offerts",
+          "Un bénéficiaire active Premium gratuitement et connaît sa date exacte d’expiration avant de confirmer."
+        ],
+        [
+          "🌐",
+          "Plusieurs serveurs",
+          "Pendant la période active, le bénéficiaire peut appliquer Premium aux serveurs Discord qu’il administre."
+        ],
+        [
+          "🛡️",
+          "Aucun paiement surprise",
+          "Aucune carte, aucun abonnement, aucun renouvellement automatique et aucun prélèvement ne sont demandés."
+        ],
+        [
+          "📦",
+          "Retour Free sans perte",
+          "À l’échéance, les réglages restent conservés et seules les nouvelles créations au-delà des limites Free sont bloquées."
+        ],
+        [
+          "⚙️",
+          "Activation depuis Discord ou le panel",
+          "La commande /premium et le Control Center partagent le même accès sécurisé et la même limite globale."
+        ],
+        [
+          "🔐",
+          "Permissions guidées",
+          "ACCUEIL reste visible à tous, les espaces membres s’ouvrent après le règlement et STAFF reste réservé aux rôles d’équipe."
+        ],
+        [
+          "💾",
+          "Migration avec sauvegarde",
+          "Les serveurs déjà configurés sont sauvegardés, synchronisés puis vérifiés individuellement."
+        ],
+        [
+          "🔒",
+          "Durcissement des données",
+          "Les sauvegardes locales sont chiffrées, les transcripts sont nettoyés et les sessions expirées sont purgées automatiquement."
+        ]
+      ]
+    },
+    {
+      "version": "1.4.0",
+      "dateLabel": "26 août 2026",
+      "releasedAt": "2026-08-26T00:00:00+02:00",
+      "status": "available",
+      "statusLabel": "Disponible",
+      "title": "Une assistance claire et bien encadrée",
+      "intro": "FyxBot centralise désormais les demandes d’aide et permet au propriétaire de constituer une équipe Support avec des droits précis.",
+      "changes": [
+        [
+          "🛟",
+          "Centre Support",
+          "Créez et suivez une demande privée depuis le Control Center pour chacun de vos serveurs administrés."
+        ],
+        [
+          "💬",
+          "Conversations suivies",
+          "Échangez avec l’équipe FyxBot dans un fil persistant qui conserve le statut, la priorité et l’historique utile."
+        ],
+        [
+          "📥",
+          "Boîte de réception Créateur",
+          "Le propriétaire de FyxBot dispose d’une vue globale pour traiter les demandes sans mélanger les communautés."
+        ],
+        [
+          "🛡️",
+          "Équipe Support",
+          "Accordez les rôles Modérateur ou Administrateur depuis l’espace Créateur, sans accès attribué par défaut."
+        ],
+        [
+          "🔐",
+          "Accès maîtrisés",
+          "Les modérateurs gèrent les réponses et statuts, les administrateurs peuvent aussi régler les priorités, et seul le propriétaire gère l’équipe."
+        ]
+      ]
+    },
+    {
+      "version": "1.3.0",
+      "dateLabel": "25 août 2026",
+      "releasedAt": "2026-08-25T00:00:00+02:00",
+      "status": "available",
+      "statusLabel": "Disponible",
+      "title": "Des rendez-vous et des concours vivants",
+      "intro": "Ce lot communautaire permet d’organiser les temps forts du serveur sans ajouter un autre bot.",
+      "changes": [
+        [
+          "📅",
+          "Événements Discord",
+          "Programmez un événement natif avec une date, un fuseau, un lieu externe ou un salon vocal."
+        ],
+        [
+          "🎉",
+          "Concours automatiques",
+          "Publiez un lot, recueillez une participation unique par membre et laissez FyxBot effectuer le tirage."
+        ],
+        [
+          "🧭",
+          "Pilotage depuis le panel",
+          "Consultez les événements à venir et les concours actifs pour le serveur sélectionné."
+        ],
+        [
+          "🔐",
+          "Données limitées",
+          "Les identifiants nécessaires au concours sont effacés dès que le résultat est publié."
+        ]
+      ]
+    },
+    {
+      "version": "1.2.0",
+      "dateLabel": "24 août 2026",
+      "releasedAt": "2026-08-24T00:00:00+02:00",
+      "status": "available",
+      "statusLabel": "Disponible",
+      "title": "Votre serveur, guidé et automatisé",
+      "intro": "Une mise à jour majeure pour construire, configurer et animer une communauté depuis FyxBot.",
+      "changes": [
+        [
+          "✉️",
+          "Constructeur de messages",
+          "Composez du texte, un embed, une image, une miniature et un bouton dans une seule publication."
+        ],
+        [
+          "📰",
+          "Modèle Changelog",
+          "Reproduisez un format structuré avec titre, version, environnement et lien vers les détails."
+        ],
+        [
+          "👁️",
+          "Aperçu Discord",
+          "Vérifiez la mise en page, les couleurs et les visuels avant de publier dans le salon choisi."
+        ],
+        [
+          "⌨️",
+          "Commandes Discord",
+          "Utilisez /message envoyer ou /message changelog directement depuis Discord."
+        ],
+        [
+          "📡",
+          "Diffusion automatique",
+          "Le setup crée un salon changelog et FyxBot y annonce chaque nouvelle version ou correctif sans doublon."
+        ],
+        [
+          "🚀",
+          "Parcours guidé",
+          "Suivez sept étapes calculées depuis la configuration réelle et ouvrez directement chaque réglage restant."
+        ],
+        [
+          "🧩",
+          "Serveur sur mesure",
+          "Décrivez librement votre projet puis prévisualisez les rôles, catégories, salons et permissions proposés."
+        ],
+        [
+          "📣",
+          "Réseaux automatiques",
+          "Surveillez les nouvelles vidéos YouTube et les nouveaux lives Twitch sans republier un ancien contenu."
+        ],
+        [
+          "📊",
+          "Animation communautaire",
+          "Publiez des sondages Discord natifs et préparez les salons vocaux temporaires depuis FyxBot."
+        ],
+        [
+          "💎",
+          "Premium préparé",
+          "Découvrez les fondations de FyxBot Premium sans paiement ni limitation active."
+        ]
+      ]
+    },
+    {
+      "version": "1.1.0",
+      "dateLabel": "24 août 2026",
+      "releasedAt": "2026-08-24T00:00:00+02:00",
+      "status": "available",
+      "statusLabel": "Disponible",
+      "title": "La communauté au centre",
+      "intro": "Une mise à jour orientée animation, information et autonomie des membres.",
+      "changes": [
+        [
+          "📜",
+          "Règlement interactif",
+          "Création de règlements personnalisés ou à partir de modèles, modification du message et rôle après acceptation."
+        ],
+        [
+          "🎂",
+          "Anniversaires",
+          "Inscription volontaire, annonces automatiques, fuseaux horaires et rôle anniversaire temporaire."
+        ],
+        [
+          "📣",
+          "Notifications sociales",
+          "Annonces de lives et de nouvelles vidéos avec plateforme, lien et rôle facultatif."
+        ],
+        [
+          "🔊",
+          "Vocaux temporaires",
+          "Générateur de salons personnels avec nom, limite, verrouillage, autorisations et transfert de propriété."
+        ],
+        [
+          "⚙️",
+          "Control Center",
+          "Quatre nouveaux espaces de configuration isolés pour chaque serveur Discord."
+        ]
+      ]
+    },
+    {
+      "version": "1.0.0",
+      "dateLabel": "23 août 2026",
+      "releasedAt": "2026-08-23T00:00:00+02:00",
+      "status": "available",
+      "statusLabel": "Disponible",
+      "title": "Lancement public de FyxBot",
+      "intro": "Première base publique du bot et de son centre de contrôle.",
+      "changes": [
+        [
+          "🛡️",
+          "Modération et sécurité",
+          "Sanctions, avertissements persistants, AutoMod et journaux d’activité."
+        ],
+        [
+          "🎫",
+          "Tickets et rôles",
+          "Panneaux configurables, tickets privés, transcripts et rôles interactifs."
+        ],
+        [
+          "👋",
+          "Accueil",
+          "Messages de bienvenue et de départ avec rôle automatique."
+        ],
+        [
+          "🌐",
+          "Panel web",
+          "Connexion Discord, sélection du serveur et configuration indépendante par communauté."
+        ]
+      ]
+    }
+  ]
+}

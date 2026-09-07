@@ -1,0 +1,8 @@
+interface:
+  display_name: "Designer FyxBot"
+  short_description: "Cree les visuels et audite le design FyxBot"
+  brand_color: "#FF5A2A"
+  default_prompt: "Utilise $fyxbot-designer pour creer un visuel coherent avec la direction artistique FyxBot."
+
+policy:
+  allow_implicit_invocation: true

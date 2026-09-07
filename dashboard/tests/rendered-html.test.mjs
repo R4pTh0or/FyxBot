@@ -1,0 +1,172 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+async function render(pathname = "/") {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+
+  return worker.fetch(
+    new Request(`http://localhost${pathname}`, { headers: { accept: "text/html" } }),
+    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+}
+
+test("affiche le Control Center FyxBot côté serveur", async () => {
+  const response = await render();
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  const csp = response.headers.get("content-security-policy") ?? "";
+  assert.match(csp, /connect-src 'self'(?:;|$)/);
+  assert.match(csp, /object-src 'none'/);
+  assert.doesNotMatch(csp, /unsafe-eval|\bhttps:\s|\bws:\s|\bwss:\s/);
+
+  const html = await response.text();
+  assert.match(html, /<title>FyxBot — Bot Discord de modération, tickets et sécurité<\/title>/i);
+  assert.match(html, /name="description" content="FyxBot est un bot Discord français/i);
+  assert.match(html, /name="google-site-verification"/i);
+  assert.match(html, /rel="canonical" href="https:\/\/fyxbot-panel-production\.up\.railway\.app\/?"/i);
+  assert.match(html, /application\/ld\+json/i);
+  assert.match(html, /FYXBOT/);
+  assert.match(html, /CONTROL CENTER/);
+  assert.match(html, /BOT DISCORD PUBLIC/);
+  assert.match(html, /Ajoutez FyxBot à votre serveur Discord/);
+  assert.match(html, /Modérez votre communauté/);
+  assert.match(html, /Inviter FyxBot/);
+  assert.match(html, /Mascotte robot FyxBot/);
+  assert.match(html, /Support et signalement/);
+  assert.match(html, /name="creator" content="Équipe FyxBot"/i);
+  assert.doesNotMatch(html, /Antony Gerphagnon/i);
+  assert.doesNotMatch(html, /DISCORD_TOKEN|DISCORD_CLIENT_SECRET|BACKUP_SECRET|PRIVATE KEY/i);
+});
+
+test("publie les informations légales et la procédure de signalement à jour", async () => {
+  const [terms, privacy, support, changelog] = await Promise.all([
+    render("/conditions-utilisation"),
+    render("/politique-confidentialite"),
+    render("/support"),
+    render("/changelog"),
+  ]);
+
+  assert.equal(terms.status, 200);
+  const termsHtml = await terms.text();
+  assert.match(termsHtml, /FyxBot est disponible en ligne/);
+  assert.match(termsHtml, /cent premiers comptes Discord/);
+  assert.match(termsHtml, /aucun renouvellement automatique/);
+  assert.equal(privacy.status, 200);
+  const privacyHtml = await privacy.text();
+  assert.match(privacyHtml, /Railway héberge le bot/);
+  assert.match(privacyHtml, /Participants à un concours/);
+  assert.match(privacyHtml, /modérateurs et administrateurs Support/);
+  assert.match(privacyHtml, /Accès Fondateur Premium/);
+  assert.match(privacyHtml, /aucune donnée bancaire/);
+  assert.equal(support.status, 200);
+  const supportHtml = await support.text();
+  assert.match(supportHtml, /Support et signalement/);
+  assert.match(supportHtml, /Signaler un abus ou une violation/);
+  assert.match(supportHtml, /Exercer mes droits/);
+  assert.match(supportHtml, /\?support=technical/);
+  assert.match(supportHtml, /\?support=abuse/);
+  assert.match(supportHtml, /\?support=privacy/);
+  assert.match(supportHtml, /\?support=security/);
+  assert.equal(changelog.status, 200);
+  const changelogHtml = await changelog.text();
+  assert.match(changelogHtml, /La communauté au centre/);
+  assert.match(changelogHtml, /Disponible/);
+  assert.match(changelogHtml, /VERSION[\s\S]*?1\.5\.0/);
+  assert.match(changelogHtml, /100 premiers utilisateurs Discord/);
+  assert.match(changelogHtml, /26 août 2026/);
+});
+
+test("conserve les protections essentielles du panel", async () => {
+  const [dashboard, css, robots, sitemap, nextConfig, viteConfig, prerenderManifest, releaseSource, releasePublic] = await Promise.all([
+    readFile(new URL("../app/Dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+    readFile(new URL("../public/robots.txt", import.meta.url), "utf8"),
+    readFile(new URL("../public/sitemap.txt", import.meta.url), "utf8"),
+    readFile(new URL("../next.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
+    readFile(new URL("../dist/server/vinext-prerender.json", import.meta.url), "utf8"),
+    readFile(new URL("../app/release-manifest.json", import.meta.url), "utf8"),
+    readFile(new URL("../public/release.json", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(dashboard, /TOUT SUPPRIMER/);
+  assert.match(dashboard, /value="complete"/);
+  assert.match(dashboard, /value="synchronize"/);
+  assert.match(dashboard, /value="reset"/);
+  assert.match(dashboard, /AUDIT DU SERVEUR/);
+  assert.match(dashboard, /document\.visibilityState==="visible"/);
+  assert.match(dashboard, /aria-modal="true"/);
+  assert.match(dashboard, /rel="noreferrer"/);
+  assert.match(dashboard, /Inviter FyxBot/);
+  assert.match(dashboard, /scope=bot\+applications\.commands/);
+  assert.match(dashboard, /permissions=581641939577974/);
+  assert.match(dashboard, /securityScore/);
+  assert.match(dashboard, /CENTRE DE PILOTAGE/);
+  assert.match(dashboard, /desktop-navigation/);
+  assert.match(dashboard, /mobile-navigation/);
+  assert.match(dashboard, /Tous les modules/);
+  assert.match(dashboard, /mobilePrimaryNavigation/);
+  assert.match(dashboard, /RÈGLEMENT INTERACTIF/);
+  assert.match(dashboard, /SALONS VOCAUX TEMPORAIRES/);
+  assert.match(dashboard, /CONSTRUCTEUR DE MESSAGES/);
+  assert.match(dashboard, /Archives réouvrables/);
+  assert.match(dashboard, /APERÇU DISCORD/);
+  assert.match(dashboard, /PARCOURS GUIDÉ/);
+  assert.match(dashboard, /SURVEILLANCE AUTOMATIQUE/);
+  assert.match(dashboard, /ACCÈS FONDATEUR FYXBOT/);
+  assert.match(dashboard, /100 premiers utilisateurs/);
+  assert.match(dashboard, /Aucun moyen de paiement requis/);
+  assert.match(dashboard, /premium\/founder/);
+  assert.match(dashboard, /ÉQUIPE SUPPORT/);
+  assert.match(dashboard, /support\/staff\/upsert/);
+  assert.match(dashboard, /support\/staff\/remove/);
+  assert.match(dashboard, /fyxbot-pending-support-category/);
+  assert.match(dashboard, /URLSearchParams\(window\.location\.search\)\.get\("support"\)/);
+  assert.match(dashboard, /ACCORDER/);
+  assert.match(dashboard, /État technique/);
+  assert.match(dashboard, /pendingNewGuilds/);
+  assert.match(dashboard, /OUTILS COMMUNAUTAIRES/);
+  assert.match(dashboard, /ÉVÉNEMENT DISCORD/);
+  assert.match(dashboard, /CONCOURS AUTOMATIQUE/);
+  assert.match(dashboard, /\/community\/event/);
+  assert.match(dashboard, /\/community\/giveaway/);
+  assert.match(dashboard, /\/social\/sources/);
+  assert.match(dashboard, /\/messages\/send/);
+  assert.match(dashboard, /"X-FyxBot-CSRF": csrfToken/);
+  assert.match(dashboard, /auth\/logout[\s\S]*?mutationHeaders\(csrfToken, false\)/);
+  assert.match(dashboard, /CURRENT_RELEASE\.version/);
+  assert.match(css, /\.discord-embed/);
+  assert.match(css, /--accent:#ff5a2a/);
+  assert.match(css, /@media\(max-width:650px\)/);
+  assert.match(css, /mobile-nav-sheet/);
+  assert.match(css, /prefers-reduced-motion:reduce/);
+  assert.match(robots, /Sitemap: https:\/\/fyxbot-panel-production\.up\.railway\.app\/sitemap\.txt/);
+  assert.match(sitemap, /^https:\/\/fyxbot-panel-production\.up\.railway\.app\/$/m);
+  assert.match(sitemap, /^https:\/\/fyxbot-panel-production\.up\.railway\.app\/support$/m);
+  assert.match(sitemap, /^https:\/\/fyxbot-panel-production\.up\.railway\.app\/changelog$/m);
+  assert.match(nextConfig, /source: "\/api\/:path\*"[\s\S]*?no-store/);
+  assert.match(nextConfig, /public, max-age=0, s-maxage=30, must-revalidate/);
+  assert.match(nextConfig, /Last-Modified/);
+  assert.match(nextConfig, /X-FyxBot-Version/);
+  assert.match(nextConfig, /object-src 'none'/);
+  assert.match(nextConfig, /!isProduction \? \["'unsafe-eval'"\] : \[\]/);
+  assert.doesNotMatch(nextConfig, /connect-src 'self' http:\/\/localhost:3001[\s\S]*?https: ws: wss:/);
+  assert.match(viteConfig, /prerender: \{ routes: "\*" \}/);
+  const prerenderedRoutes = JSON.parse(prerenderManifest).routes;
+  const homeRoute = prerenderedRoutes.find(route => route.route === "/");
+  const changelogRoute = prerenderedRoutes.find(route => route.route === "/changelog");
+  assert.equal(homeRoute?.status, "rendered");
+  assert.equal(homeRoute?.revalidate, 30);
+  assert.equal(homeRoute?.expire, 60);
+  assert.equal(changelogRoute?.status, "rendered");
+  assert.equal(changelogRoute?.revalidate, 30);
+  assert.equal(changelogRoute?.expire, 60);
+  const release = JSON.parse(releaseSource);
+  assert.equal(release.currentVersion, "1.5.0");
+  assert.equal(release.status, "available");
+  assert.deepEqual(JSON.parse(releasePublic), release);
+});

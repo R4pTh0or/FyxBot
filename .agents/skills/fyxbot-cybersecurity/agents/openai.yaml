@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cybersécurité FyxBot"
+  short_description: "Audite et renforce la sécurité de FyxBot"
+  default_prompt: "Utilise $fyxbot-cybersecurity pour auditer et renforcer la sécurité du projet FyxBot."

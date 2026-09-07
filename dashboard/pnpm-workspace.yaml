@@ -1,0 +1,6 @@
+allowBuilds:
+  esbuild: true
+  sharp: true
+  workerd: true
+# Nom technique conservé pour réutiliser l'installation locale existante.
+virtualStoreDir: node_modules/.pnpm-nexora

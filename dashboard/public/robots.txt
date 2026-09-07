@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+
+Sitemap: https://fyxbot-panel-production.up.railway.app/sitemap.txt

@@ -1,0 +1,5 @@
+interface:
+  display_name: "Développeur Web FyxBot"
+  short_description: "Audite et améliore le panel web FyxBot"
+  default_prompt: "Use $fyxbot-web-developer to audit and improve the FyxBot web dashboard autonomously."
+
