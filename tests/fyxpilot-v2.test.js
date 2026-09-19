@@ -40,7 +40,16 @@ test('enregistre une modification réversible sans exposer de contenu sensible',
 test('simule les trois modes sans modifier Discord', () => {
   const simulation = buildSetupSimulation({
     blueprint: { roles: [{}, {}], categories: [{}], channels: [{}, {}, {}] },
-    current: { roles: 4, categories: 2, channels: 5 },
+    current: {
+      roles: 4,
+      categories: 2,
+      channels: 5,
+      resettable: {
+        roles: ['VIP', 'Membre'],
+        categories: ['COMMUNAUTÉ'],
+        channels: ['général', 'annonces'],
+      },
+    },
     analysis: {
       missingRoles: ['Membre'], missingCategories: [], missingChannels: ['général'],
       misplacedChannels: ['annonces'], permissionIssues: ['Catégorie STAFF'],
@@ -50,15 +59,43 @@ test('simule les trois modes sans modifier Discord', () => {
   assert.equal(simulation.previewOnly, true);
   assert.equal(simulation.totalChanges, 4);
   assert.equal(simulation.plans.complete.deletes, 0);
+  assert.deepEqual(simulation.plans.complete.projected, { roles: 5, categories: 2, channels: 6 });
   assert.equal(simulation.plans.synchronize.updates, 2);
   assert.equal(simulation.plans.reset.risk, 'critical');
+  assert.equal(simulation.plans.reset.deletes, 5);
+  assert.deepEqual(simulation.plans.reset.projected, { roles: 2, categories: 1, channels: 3 });
+  assert.ok(simulation.removals.includes('Rôle : VIP'));
+  assert.ok(simulation.removals.includes('Salon : général'));
 });
 
-test('compte les catégories actuelles avec la longueur de la liste Discord', () => {
+test('respecte un serveur vide dans les projections FyxPilot', () => {
+  const simulation = buildSetupSimulation({
+    blueprint: { roles: [{}], categories: [{}], channels: [{}] },
+    current: { roles: 0, categories: 0, channels: 0, resettable: { roles: [], categories: [], channels: [] } },
+    analysis: {
+      missingRoles: ['Membre'], missingCategories: ['ACCUEIL'], missingChannels: ['bienvenue'],
+      misplacedChannels: [], permissionIssues: [], extraRoles: [], extraCategories: [], extraChannels: [],
+    },
+  });
+  assert.deepEqual(simulation.before, { roles: 0, categories: 0, channels: 0 });
+  assert.deepEqual(simulation.plans.complete.projected, { roles: 1, categories: 1, channels: 1 });
+  assert.equal(simulation.plans.reset.deletes, 0);
+});
+
+test('compte séparément catégories, salons et rôles gérables dans la structure Discord', () => {
   const dashboardServerSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'dashboardServer.js'), 'utf8');
-  assert.match(dashboardServerSource, /categories: categories\.length/);
-  assert.match(dashboardServerSource, /channels: Math\.max\(channels\.size - categories\.length, 0\)/);
+  assert.match(dashboardServerSource, /categories: categoryList\.length/);
+  assert.match(dashboardServerSource, /channels: regularChannels\.length/);
+  assert.match(dashboardServerSource, /roles: roleList\.length/);
+  assert.match(dashboardServerSource, /setupCurrentSnapshot\(fullGuild, currentChannels, currentRoles\)/);
   assert.doesNotMatch(dashboardServerSource, /categories: categories\.size/);
+});
+
+test('affiche la projection et les suppressions propres au mode choisi', () => {
+  const dashboardSource = fs.readFileSync(path.join(__dirname, '..', 'dashboard', 'app', 'Dashboard.tsx'), 'utf8');
+  assert.match(dashboardSource, /plan\.projected\.roles/);
+  assert.match(dashboardSource, /mode === "reset" \? simulation\.removals : \[\]/);
+  assert.match(dashboardSource, /Aucune suppression avec cette action/);
 });
 
 test('réunit les contenus éditables sans inclure le changelog officiel', () => {

@@ -351,6 +351,23 @@ function validateId(value, allowedIds, label) {
   return value;
 }
 
+function setupCurrentSnapshot(guild, channels, roles) {
+  const channelList = [...channels.values()].filter(Boolean);
+  const categoryList = channelList.filter((channel) => channel.type === ChannelType.GuildCategory);
+  const regularChannels = channelList.filter((channel) => channel.type !== ChannelType.GuildCategory);
+  const roleList = [...roles.values()].filter((role) => role.id !== guild.id && !role.managed);
+  return {
+    roles: roleList.length,
+    categories: categoryList.length,
+    channels: regularChannels.length,
+    resettable: {
+      roles: roleList.filter((role) => role.editable).map((role) => role.name),
+      categories: categoryList.filter((channel) => channel.deletable).map((channel) => channel.name),
+      channels: regularChannels.filter((channel) => channel.deletable).map((channel) => channel.name),
+    },
+  };
+}
+
 async function getDashboardState(client, requestedGuildId = null, manageableGuildIds = null, requestingUserId = null) {
   const availableGuilds = [...client.guilds.cache.values()].filter((guild) => !manageableGuildIds || manageableGuildIds.includes(guild.id));
   if (requestedGuildId && manageableGuildIds && !manageableGuildIds.includes(requestedGuildId)) {
@@ -430,11 +447,7 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
   const setupSimulation = buildSetupSimulation({
     analysis: setupAnalysis,
     blueprint: setupBlueprint,
-    current: {
-      roles: roleList.length,
-      categories: categories.length,
-      channels: Math.max(channels.size - categories.length, 0),
-    },
+    current: setupCurrentSnapshot(fullGuild, channels, roles),
   });
   const channelNames = new Map(channels.filter(Boolean).map((channel) => [channel.id, channel.name]));
   const publishedMessages = await listPublishedMessages(fullGuild.id);
@@ -1819,15 +1832,19 @@ function startDashboardServer(client, options = {}) {
         if (mode === 'design') {
           const blueprint = buildAdaptiveBlueprint(body.description, { guildName: state.guild.name });
           await saveServerSetupDraft(state.guild.id, blueprint);
-          const analysis = await analyzeServerStructure(await guild.fetch(), {}, blueprint);
+          const fullGuild = await guild.fetch();
+          const [currentChannels, currentRoles] = await Promise.all([
+            fullGuild.channels.fetch(),
+            fullGuild.roles.fetch(),
+          ]);
+          const analysis = await analyzeServerStructure(fullGuild, {
+            channels: currentChannels,
+            roles: currentRoles,
+          }, blueprint);
           const simulation = buildSetupSimulation({
             analysis,
             blueprint,
-            current: {
-              roles: state.options.roles.length,
-              categories: state.options.categories.length,
-              channels: state.options.textChannels.length + state.options.voiceChannels.length,
-            },
+            current: setupCurrentSnapshot(fullGuild, currentChannels, currentRoles),
           });
           await recordChange(state.guild.id, {
             actorId: session.user.id,

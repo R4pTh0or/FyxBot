@@ -239,6 +239,7 @@ type SetupSimulation = {
     movements: string[];
     permissionChanges: string[];
     preserved: string[];
+    removals: string[];
     totalChanges: number;
     plans: Record<SetupMode, {
         risk: "low" | "guarded" | "critical";
@@ -246,6 +247,7 @@ type SetupSimulation = {
         updates: number;
         deletes: number;
         preserves: number;
+        projected: { roles: number; categories: number; channels: number };
     }>;
 };
 type OnboardingProgress = {
@@ -718,7 +720,61 @@ function FyxVisionWorkspace({ simulation, mode }: { simulation: SetupSimulation;
     const [twinOpen, setTwinOpen] = useState(true);
     const plan = simulation.plans[mode];
     const riskLabels = { low: "Faible", guarded: "Surveillé", critical: "Critique" } as const;
-    return <section className="fyxvision-workspace"><header><div><p className="eyebrow">FYXVISION + FYXTWIN</p><h2>Voyez l’impact avant de toucher à Discord</h2><p>Le jumeau simule le résultat à partir de la structure actuelle. Aucune action Discord n’est exécutée ici.</p></div><button type="button" onClick={() => setTwinOpen(open => !open)}>{twinOpen ? "Masquer" : "Afficher"} la simulation</button></header>{twinOpen && <><div className="fyxtwin-stats"><article><span>RÔLES</span><strong>{simulation.before.roles} → {simulation.desired.roles}</strong></article><article><span>CATÉGORIES</span><strong>{simulation.before.categories} → {simulation.desired.categories}</strong></article><article><span>SALONS</span><strong>{simulation.before.channels} → {simulation.desired.channels}</strong></article><article className={`risk-${plan.risk}`}><span>RISQUE</span><strong>{riskLabels[plan.risk]}</strong></article></div><div className="fyxvision-diff"><section><h3>+ Ajouts · {simulation.additions.length}</h3>{simulation.additions.slice(0, 8).map(item => <span className="added" key={item}>{item}</span>)}{simulation.additions.length === 0 && <p>Aucun élément manquant.</p>}</section><section><h3>↔ Corrections · {simulation.movements.length + simulation.permissionChanges.length}</h3>{[...simulation.movements, ...simulation.permissionChanges].slice(0, 8).map(item => <span className="updated" key={item}>{item}</span>)}{simulation.movements.length + simulation.permissionChanges.length === 0 && <p>Aucune correction nécessaire.</p>}</section><section><h3>✓ Conservés · {simulation.preserved.length}</h3>{simulation.preserved.slice(0, 8).map(item => <span className="preserved" key={item}>{item}</span>)}{simulation.preserved.length === 0 && <p>Aucun élément personnel détecté.</p>}</section></div><div className="fyxtwin-plan"><strong>Simulation de l’action sélectionnée</strong><span>{plan.creates} création(s)</span><span>{plan.updates} correction(s)</span><span className={plan.deletes ? "danger" : ""}>{plan.deletes} suppression(s)</span><span>{plan.preserves} élément(s) conservé(s)</span></div></>}</section>;
+    const corrections = [...simulation.movements, ...simulation.permissionChanges];
+    const removals = mode === "reset" ? simulation.removals : [];
+    const preserved = mode === "reset" ? [] : simulation.preserved;
+    const moreRemovals = Math.max(removals.length - 8, 0);
+
+    return <section className="fyxvision-workspace">
+        <header>
+            <div>
+                <p className="eyebrow">FYXVISION + FYXTWIN</p>
+                <h2>Voyez l’impact avant de toucher à Discord</h2>
+                <p>Le jumeau simule le résultat de l’action choisie. Aucune modification Discord n’est exécutée ici.</p>
+            </div>
+            <button type="button" onClick={() => setTwinOpen(open => !open)}>{twinOpen ? "Masquer" : "Afficher"} la simulation</button>
+        </header>
+        {twinOpen && <>
+            <div className="fyxtwin-stats">
+                <article><span>RÔLES</span><strong>{simulation.before.roles} → {plan.projected.roles}</strong></article>
+                <article><span>CATÉGORIES</span><strong>{simulation.before.categories} → {plan.projected.categories}</strong></article>
+                <article><span>SALONS</span><strong>{simulation.before.channels} → {plan.projected.channels}</strong></article>
+                <article className={`risk-${plan.risk}`}><span>RISQUE</span><strong>{riskLabels[plan.risk]}</strong></article>
+            </div>
+            <div className="fyxvision-diff">
+                <section>
+                    <h3>+ Ajouts · {simulation.additions.length}</h3>
+                    {simulation.additions.slice(0, 8).map(item => <span className="added" key={item}>{item}</span>)}
+                    {simulation.additions.length === 0 && <p>Aucun élément manquant.</p>}
+                </section>
+                <section>
+                    <h3>↔ Corrections · {corrections.length}</h3>
+                    {corrections.slice(0, 8).map(item => <span className="updated" key={item}>{item}</span>)}
+                    {corrections.length === 0 && <p>Aucune correction nécessaire.</p>}
+                </section>
+                <section>
+                    <h3>− Suppressions · {removals.length}</h3>
+                    {removals.slice(0, 8).map(item => <span className="removed" key={item}>{item}</span>)}
+                    {moreRemovals > 0 && <span className="removed">+ {moreRemovals} autre(s)</span>}
+                    {mode !== "reset" && <p>Aucune suppression avec cette action.</p>}
+                    {mode === "reset" && removals.length === 0 && <p>Aucun élément supprimable détecté.</p>}
+                </section>
+                <section>
+                    <h3>✓ Conservés · {preserved.length}</h3>
+                    {preserved.slice(0, 8).map(item => <span className="preserved" key={item}>{item}</span>)}
+                    {mode === "reset" && <p>La reconstruction remplace les éléments que FyxBot peut gérer.</p>}
+                    {mode !== "reset" && preserved.length === 0 && <p>Aucun élément personnel détecté.</p>}
+                </section>
+            </div>
+            <div className="fyxtwin-plan">
+                <strong>Simulation de l’action sélectionnée</strong>
+                <span>{plan.creates} création(s)</span>
+                <span>{plan.updates} correction(s)</span>
+                <span className={plan.deletes ? "danger" : ""}>{plan.deletes} suppression(s)</span>
+                <span>{plan.preserves} élément(s) conservé(s)</span>
+            </div>
+        </>}
+    </section>;
 }
 function SetupDashboard({ data, form, update, runSetup, deletePreview, saveNickname }: {
     data: State;

@@ -17,7 +17,7 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [x] Stockage PostgreSQL disponible avec repli SQLite contrôlé.
 - [x] Sauvegardes chiffrées et tests automatisés de restauration.
 - [x] Journalisation structurée et contrôles d'accès du panel.
-- [x] Suite locale validée : 275 tests bot et 5 tests panel, lint, types et build.
+- [x] Suite locale validée : 277 tests bot et 5 tests panel, lint, types et build.
 - [ ] Mettre à jour automatiquement l'état du projet et la liste des commandes.
 - [x] Relier le dossier source `C:\Fyxbot` au dépôt GitHub FyxBot ; le dépôt Git vide imbriqué dans `dashboard` a été sauvegardé localement avant son retrait.
 - [ ] Effectuer un exercice réel de restauration R2 sans modifier la production.
@@ -28,10 +28,10 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [x] Génération d'une structure depuis une description libre.
 - [x] Aperçu avant application et sauvegarde avant modification.
 - [x] Synchronisation, reconstruction et restauration d'un serveur.
-- [ ] Afficher un comparatif lisible : ajout, modification et suppression.
-- [ ] Enregistrer un brouillon et reprendre la configuration plus tard.
-- [ ] Afficher l'historique des changements avec leur auteur et leur résultat.
-- [ ] Proposer un retour arrière depuis le panel avec confirmation renforcée.
+- [x] Afficher un comparatif lisible : ajout, modification, suppression et résultat projeté selon l'action choisie.
+- [x] Enregistrer un brouillon et reprendre la configuration plus tard.
+- [x] Afficher l'historique des changements avec leur auteur et leur résultat.
+- [x] Proposer un retour arrière depuis le panel avec confirmation renforcée.
 - [ ] Afficher les permissions finales par rôle et par catégorie avant application.
 
 ## 3. FyxStream
