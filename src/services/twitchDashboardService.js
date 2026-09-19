@@ -1,4 +1,5 @@
 const twitchStore = require('../database/twitchStore');
+const { getRecentAuditLogs } = require('../database/auditLogStore');
 const { RESERVED_TWITCH_COMMANDS } = require('./twitchCommandRegistry');
 const { TwitchApiClient, TwitchApiError } = require('./twitchApi');
 
@@ -7,6 +8,12 @@ const TWITCH_BROADCASTER_SCOPES = Object.freeze([
   'moderator:manage:chat_messages',
   'moderator:manage:chat_settings',
 ]);
+const TWITCH_MODERATION_AUDIT_PREFIX = 'FyxStream · ';
+const TWITCH_SCOPE_LABELS = Object.freeze({
+  'moderator:manage:banned_users': 'Bannir, débannir et appliquer des timeouts',
+  'moderator:manage:chat_messages': 'Effacer les messages du chat',
+  'moderator:manage:chat_settings': 'Modifier le mode lent du chat',
+});
 
 class TwitchDashboardError extends Error {
   constructor(status, code, message) {
@@ -104,12 +111,27 @@ function twitchDashboardError(error) {
 async function publicTwitchStatus(guildId, dependencies = {}) {
   const store = dependencies.store || twitchStore;
   const options = storeOptions(dependencies);
-  const [connection, runtime, chat, commands] = await Promise.all([
+  const auditReader = dependencies.getAuditLogs || getRecentAuditLogs;
+  const [connection, runtime, chat, commands, recentAuditLogs] = await Promise.all([
     store.getTwitchConnection(guildId, options),
     store.getTwitchRuntimeStatus(guildId, options),
     store.getTwitchChatConfig(guildId, options),
     store.listTwitchCustomCommands(guildId, options),
+    auditReader(guildId, 100),
   ]);
+  const missingScopes = connection
+    ? TWITCH_BROADCASTER_SCOPES.filter((scope) => !connection.scopes?.includes(scope))
+    : [];
+  const authorizationFailure = runtime?.status === 'error'
+    && /autorisation|jeton|connexion.*(?:refus|échou|interromp)/i.test(String(runtime.detail || ''));
+  const reconnectRequired = Boolean(connection && (connection.expired || missingScopes.length || authorizationFailure));
+  const reconnectReason = connection?.expired
+    ? 'L’autorisation Twitch a expiré. Reconnectez la chaîne pour reprendre les actions protégées.'
+    : missingScopes.length
+      ? `${missingScopes.length} autorisation(s) de modération doivent être accordées à FyxBot.`
+      : authorizationFailure
+        ? 'Twitch a refusé ou interrompu l’autorisation. Reconnectez la chaîne.'
+        : null;
   return {
     connected: Boolean(connection),
     enabled: Boolean(connection?.enabled),
@@ -123,10 +145,28 @@ async function publicTwitchStatus(guildId, dependencies = {}) {
     expiresAt: connection?.expiresAt || null,
     expired: connection?.expired ?? null,
     connectedAt: connection?.connectedAt || null,
+    authorization: {
+      reconnectRequired,
+      reconnectReason,
+      missingPermissions: missingScopes.map((scope) => ({
+        scope,
+        label: TWITCH_SCOPE_LABELS[scope] || scope,
+      })),
+    },
     lastSignalAt: runtime?.updatedAt || connection?.updatedAt || null,
     runtime,
     chat: { ...chat, guildId },
     commands,
+    moderationHistory: (recentAuditLogs || [])
+      .filter((entry) => String(entry.title || '').startsWith(TWITCH_MODERATION_AUDIT_PREFIX))
+      .slice(0, 20)
+      .map((entry) => ({
+        id: entry.id,
+        title: String(entry.title).slice(TWITCH_MODERATION_AUDIT_PREFIX.length),
+        description: entry.description,
+        outcome: Number(entry.color) === 0x57f287 ? 'success' : 'failed',
+        createdAt: entry.createdAt,
+      })),
   };
 }
 
@@ -276,6 +316,8 @@ async function mutateTwitchCommand(guildId, input = {}, dependencies = {}) {
 
 module.exports = {
   TWITCH_BROADCASTER_SCOPES,
+  TWITCH_MODERATION_AUDIT_PREFIX,
+  TWITCH_SCOPE_LABELS,
   TwitchDashboardError,
   completeTwitchAuthorization,
   createTwitchApi,

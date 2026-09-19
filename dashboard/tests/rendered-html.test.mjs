@@ -252,12 +252,18 @@ test("intègre le chat Twitch au rendu et à la navigation FyxBot", async () => 
   assert.match(streaming, /StreamElements/);
   assert.match(streaming, /Indicateurs FyxStream/);
   assert.match(streaming, /Commandes Twitch prêtes à l’emploi/);
+  assert.match(streaming, /Modération Twitch récente/);
+  assert.match(streaming, /Reconnecter Twitch/);
+  assert.match(streaming, /TWITCH_OAUTH_ERRORS/);
+  assert.match(streaming, /sans conserver le motif saisi dans le chat/);
   assert.match(streaming, /!timeout @pseudo \[secondes\] \[raison\]/);
   assert.match(streaming, /Autoriser la modération/);
   assert.match(streaming, /enabledCommandCount/);
   assert.match(streaming, /totalCommandUses/);
   assert.match(streaming, /activeProtectionCount/);
   assert.match(css, /\.streaming-insights/);
+  assert.match(css, /\.streaming-auth-alert/);
+  assert.match(css, /\.streaming-history/);
   assert.match(css, /\.streaming-workspace/);
   assert.match(css, /prefers-reduced-motion:reduce/);
 });

@@ -56,6 +56,9 @@ annonce publique.
   `!slow`.
 - Les anciennes connexions Twitch doivent être reconnectées une fois si elles
   ne possèdent pas encore les nouvelles autorisations de modération.
+- Le panel indique désormais les autorisations précises à accorder, alerte en
+  cas d'expiration ou d'échec OAuth et affiche les vingt dernières actions de
+  modération sans conserver leur motif sensible.
 
 ### Premium
 
@@ -86,7 +89,7 @@ annonce publique.
 
 - [x] Aligner le README avec FyxStream et l'état actuel du stockage.
 - [x] Créer une définition vérifiable de la V2.
-- [x] Validation locale complète : syntaxe et types valides, **278 tests bot**,
+- [x] Validation locale complète : syntaxe et types valides, **279 tests bot**,
   **5 tests panel**, lint et build réussis.
 - [x] `C:\Fyxbot` est relié à l'historique GitHub sur la branche locale
   `v2-development-2026-09-19`. Le dépôt vide imbriqué dans `dashboard` a été
@@ -106,10 +109,10 @@ annonce publique.
 
 ### Priorité 3 — FyxStream
 
-- Reconnexion guidée lorsque des autorisations Twitch manquent.
-- Historique borné des actions de modération.
-- Alerte en cas d'expiration ou d'échec OAuth.
-- Validation réelle sur une chaîne de développement.
+- [x] Reconnexion guidée lorsque des autorisations Twitch manquent.
+- [x] Historique borné des actions de modération.
+- [x] Alerte en cas d'expiration ou d'échec OAuth.
+- [ ] Validation réelle sur une chaîne de développement.
 
 ### Priorité 4 — Premium et publication
 

@@ -141,6 +141,7 @@ function createManager(options = {}) {
       return client;
     },
     twitchApi: options.twitchApi ?? null,
+    recordAudit: options.recordAudit || (async () => {}),
     setTimeoutFn: options.setTimeoutFn,
     clearTimeoutFn: options.clearTimeoutFn,
   });
@@ -212,6 +213,7 @@ test('exécute les commandes intégrées et personnalisées avec déduplication 
 
 test('exécute les commandes de modération Twitch via Helix avec les permissions requises', async () => {
   const apiCalls = [];
+  const auditEntries = [];
   const twitchApi = {
     async helixAuthenticated(path, dependencies, init = {}) {
       apiCalls.push({ path, init });
@@ -230,7 +232,11 @@ test('exécute les commandes de modération Twitch via Helix avec les permission
       'moderator:manage:chat_settings',
     ],
   });
-  const { clients, manager } = createManager({ store, twitchApi });
+  const { clients, manager } = createManager({
+    store,
+    twitchApi,
+    recordAudit: async (guildId, entry) => auditEntries.push({ guildId, ...entry }),
+  });
   await manager.start();
 
   await clients[0].emitMessage(message('!timeout @viewer_2 60 spam', 'moderation-timeout', { isModerator: true }));
@@ -249,16 +255,31 @@ test('exécute les commandes de modération Twitch via Helix avec les permission
   assert.equal(clients[0].sent.some((value) => value.includes('@viewer_2 est en timeout')), true);
   assert.equal(clients[0].sent.includes('🧹 Le chat Twitch a été effacé.'), true);
   assert.equal(clients[0].sent.includes('🐢 Mode lent Twitch réglé sur 10 seconde(s).'), true);
+  assert.equal(auditEntries.length, 3);
+  assert.deepEqual(auditEntries.map((entry) => entry.title), [
+    'FyxStream · Timeout',
+    'FyxStream · Nettoyage du chat',
+    'FyxStream · Mode lent',
+  ]);
+  assert.equal(auditEntries.every((entry) => entry.guildId === GUILD_A && entry.color === 0x57f287), true);
+  assert.equal(auditEntries.some((entry) => entry.description.includes('spam')), false);
   manager.stop();
 });
 
 test('demande une reconnexion Twitch lorsque les permissions de modération manquent', async () => {
-  const { clients, manager } = createManager({ twitchApi: { helixAuthenticated: async () => null } });
+  const auditEntries = [];
+  const { clients, manager } = createManager({
+    twitchApi: { helixAuthenticated: async () => null },
+    recordAudit: async (guildId, entry) => auditEntries.push({ guildId, ...entry }),
+  });
   await manager.start();
   await clients[0].emitMessage(message('!clear', 'moderation-scope', { isModerator: true }));
   assert.deepEqual(clients[0].sent, [
-    'Reconnectez Twitch depuis le panel FyxBot pour activer les commandes de modération.',
+    'Autorisation manquante : moderator:manage:chat_messages. Reconnectez Twitch depuis le panel FyxBot.',
   ]);
+  assert.equal(auditEntries.length, 1);
+  assert.equal(auditEntries[0].title, 'FyxStream · Nettoyage du chat');
+  assert.equal(auditEntries[0].color, 0xed4245);
   manager.stop();
 });
 

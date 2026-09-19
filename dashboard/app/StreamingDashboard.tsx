@@ -25,8 +25,22 @@ type TwitchState = {
     runtimeStatus: string;
     runtimeDetail: string;
     updatedAt: string;
+    expiresAt: string;
+    expired: boolean;
     scopes: string[];
+    authorization: {
+        reconnectRequired: boolean;
+        reconnectReason: string;
+        missingPermissions: { scope: string; label: string }[];
+    };
     commands: TwitchCommand[];
+    moderationHistory: {
+        id: string | number;
+        title: string;
+        description: string;
+        outcome: "success" | "failed";
+        createdAt: string;
+    }[];
 };
 
 type LoadState = "loading" | "ready" | "error";
@@ -48,8 +62,12 @@ const EMPTY_STATE: TwitchState = {
     runtimeStatus: "disconnected",
     runtimeDetail: "",
     updatedAt: "",
+    expiresAt: "",
+    expired: false,
     scopes: [],
+    authorization: { reconnectRequired: false, reconnectReason: "", missingPermissions: [] },
     commands: [],
+    moderationHistory: [],
 };
 
 const TWITCH_MODERATION_COMMANDS = [
@@ -74,6 +92,15 @@ const ACCESS_LABELS: Record<TwitchCommand["accessLevel"], string> = {
     broadcaster: "Diffuseur",
 };
 
+const TWITCH_OAUTH_ERRORS: Record<string, string> = {
+    DISCORD_LOGIN_REQUIRED: "Reconnectez-vous à Discord avant de relier Twitch.",
+    DISCORD_ACCESS_DENIED: "Votre compte Discord ne peut pas administrer ce serveur.",
+    TWITCH_INVALID_STATE: "La demande de connexion Twitch a expiré. Recommencez depuis ce panel.",
+    TWITCH_AUTHORIZATION_CANCELLED: "La connexion Twitch a été annulée.",
+    TWITCH_AUTHORIZATION_REFUSED: "Twitch a refusé l’autorisation. Vérifiez le compte puis réessayez.",
+    TWITCH_NOT_CONFIGURED: "La connexion Twitch n’est pas encore configurée pour FyxBot.",
+};
+
 function asRecord(value: unknown): Record<string, unknown> {
     return value !== null && typeof value === "object" && !Array.isArray(value)
         ? value as Record<string, unknown>
@@ -94,6 +121,49 @@ function asNumber(value: unknown, fallback = 0) {
 
 function asStringArray(value: unknown) {
     return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function parseMissingPermissions(value: unknown) {
+    return Array.isArray(value)
+        ? value.map((item) => asRecord(item)).map((item) => ({
+            scope: asString(item.scope),
+            label: asString(item.label, asString(item.scope)),
+        })).filter((item) => item.scope && item.label)
+        : [];
+}
+
+function parseModerationHistory(value: unknown): TwitchState["moderationHistory"] {
+    return Array.isArray(value)
+        ? value.map((item) => asRecord(item)).map((item, index) => ({
+            id: typeof item.id === "number" || typeof item.id === "string" ? item.id : `history-${index}`,
+            title: asString(item.title, "Modération Twitch"),
+            description: asString(item.description),
+            outcome: asString(item.outcome) === "success" ? "success" as const : "failed" as const,
+            createdAt: asString(item.createdAt ?? item.created_at),
+        }))
+        : [];
+}
+
+function twitchOAuthFeedback() {
+    if (typeof window === "undefined")
+        return null;
+    const url = new URL(window.location.href);
+    const errorCode = url.searchParams.get("twitchError");
+    const status = url.searchParams.get("twitch");
+    if (!errorCode && status !== "connected")
+        return null;
+    return errorCode
+        ? { kind: "error" as const, message: TWITCH_OAUTH_ERRORS[errorCode] || "La connexion Twitch a échoué. Recommencez depuis le panel." }
+        : { kind: "success" as const, message: "Chaîne Twitch connectée. Les autorisations sont en cours de vérification." };
+}
+
+function clearTwitchOAuthFeedback() {
+    if (typeof window === "undefined")
+        return;
+    const url = new URL(window.location.href);
+    url.searchParams.delete("twitch");
+    url.searchParams.delete("twitchError");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 function parseCommand(value: unknown): TwitchCommand | null {
@@ -127,6 +197,7 @@ function parseTwitchState(payloadValue: unknown): TwitchState {
         ? rawCommands.map(parseCommand).filter((command): command is TwitchCommand => command !== null)
         : [];
     const protections = asRecord(chat.protections);
+    const authorization = asRecord(payload.authorization ?? statusObject.authorization);
     const broadcasterLogin = asString(connection.broadcasterLogin ?? connection.broadcaster_login ?? connection.login ?? payload.broadcasterLogin);
     const broadcasterDisplayName = asString(connection.broadcasterDisplayName ?? connection.broadcaster_display_name ?? connection.displayName ?? payload.broadcasterDisplayName, broadcasterLogin);
     const runtimeStatus = asString(runtime.status ?? statusObject.runtimeStatus ?? payload.runtimeStatus, "disconnected");
@@ -145,8 +216,16 @@ function parseTwitchState(payloadValue: unknown): TwitchState {
         runtimeStatus,
         runtimeDetail: asString(runtime.detail ?? statusObject.runtimeDetail ?? payload.runtimeDetail),
         updatedAt: asString(payload.lastSignalAt ?? runtime.updatedAt ?? runtime.updated_at ?? connection.updatedAt ?? connection.updated_at ?? payload.updatedAt),
+        expiresAt: asString(payload.expiresAt ?? connection.expiresAt ?? connection.expires_at),
+        expired: asBoolean(payload.expired ?? connection.expired),
         scopes: asStringArray(payload.scopes ?? statusObject.scopes ?? connection.scopes),
+        authorization: {
+            reconnectRequired: asBoolean(authorization.reconnectRequired),
+            reconnectReason: asString(authorization.reconnectReason),
+            missingPermissions: parseMissingPermissions(authorization.missingPermissions),
+        },
         commands,
+        moderationHistory: parseModerationHistory(payload.moderationHistory ?? statusObject.moderationHistory),
     };
 }
 
@@ -174,6 +253,8 @@ export default function StreamingDashboard({ apiBaseUrl, guildId, csrfToken, nav
     const commandTitleId = useId();
     const deleteTitleId = useId();
     const cancelDeleteButton = useRef<HTMLButtonElement | null>(null);
+    const [oauthFeedback] = useState(twitchOAuthFeedback);
+    const oauthFeedbackHandled = useRef(false);
     const [loadState, setLoadState] = useState<LoadState>("loading");
     const [twitch, setTwitch] = useState<TwitchState>(EMPTY_STATE);
     const [error, setError] = useState("");
@@ -205,6 +286,14 @@ export default function StreamingDashboard({ apiBaseUrl, guildId, csrfToken, nav
                 throw Error(requestError(payload, "Le module Twitch est momentanément indisponible."));
             setTwitch(parseTwitchState(payload));
             setLoadState("ready");
+            if (oauthFeedback && !oauthFeedbackHandled.current) {
+                if (oauthFeedback.kind === "error")
+                    setError(oauthFeedback.message);
+                else
+                    setNotice(oauthFeedback.message);
+                oauthFeedbackHandled.current = true;
+                clearTwitchOAuthFeedback();
+            }
         }
         catch (caught) {
             if (caught instanceof DOMException && caught.name === "AbortError")
@@ -212,7 +301,7 @@ export default function StreamingDashboard({ apiBaseUrl, guildId, csrfToken, nav
             setError(caught instanceof Error ? caught.message : "Impossible de charger le module Twitch.");
             setLoadState("error");
         }
-    }, [apiBaseUrl, guildId]);
+    }, [apiBaseUrl, guildId, oauthFeedback]);
 
     useEffect(() => {
         const controller = new AbortController();
@@ -349,7 +438,11 @@ export default function StreamingDashboard({ apiBaseUrl, guildId, csrfToken, nav
     const enabledCommandCount = twitch.commands.filter(command => command.enabled).length;
     const totalCommandUses = twitch.commands.reduce((total, command) => total + command.usageCount, 0);
     const activeProtectionCount = Object.values(twitch.protections).filter(Boolean).length;
-    const moderationReady = TWITCH_MODERATION_SCOPES.every(scope => twitch.scopes.includes(scope));
+    const missingModerationScopes = twitch.authorization.missingPermissions.length > 0
+        ? twitch.authorization.missingPermissions
+        : TWITCH_MODERATION_SCOPES.filter(scope => !twitch.scopes.includes(scope)).map(scope => ({ scope, label: scope }));
+    const moderationReady = !twitch.expired && missingModerationScopes.length === 0;
+    const runtimeFailed = twitch.runtimeStatus.toLowerCase() === "error";
 
     return <section className="streaming-workspace" aria-labelledby="streaming-title">
         <div className="social-tabs" role="tablist" aria-label="Réseaux et streaming">
@@ -370,6 +463,15 @@ export default function StreamingDashboard({ apiBaseUrl, guildId, csrfToken, nav
         </div>}
 
         {loadState === "ready" && twitch.connected && <>
+            {(twitch.authorization.reconnectRequired || runtimeFailed) && <section className="streaming-auth-alert" role="alert">
+                <span aria-hidden="true">⚠️</span>
+                <div>
+                    <strong>{twitch.expired ? "Autorisation Twitch expirée" : runtimeFailed ? "Connexion Twitch à vérifier" : "Autorisations incomplètes"}</strong>
+                    <p>{twitch.authorization.reconnectReason || twitch.runtimeDetail || "Reconnectez Twitch pour rétablir toutes les fonctions FyxStream."}</p>
+                    {missingModerationScopes.length > 0 && <ul>{missingModerationScopes.map(permission => <li key={permission.scope}>{permission.label}</li>)}</ul>}
+                </div>
+                <a className="streaming-connect" href={connectUrl}>Reconnecter Twitch</a>
+            </section>}
             <div className="streaming-status-grid">
                 <article className="streaming-identity"><div className="streaming-avatar" aria-hidden="true">{(twitch.broadcasterDisplayName || twitch.broadcasterLogin || "T").slice(0, 1).toUpperCase()}</div><div><span>CHAÎNE CONNECTÉE</span><strong>{twitch.broadcasterDisplayName || twitch.broadcasterLogin || "Chaîne Twitch"}</strong><small>{twitch.broadcasterLogin ? `twitch.tv/${twitch.broadcasterLogin}` : "Identité publique indisponible"}</small></div></article>
                 <article className="streaming-runtime"><span className={runtimeOnline ? "online" : "warning"} aria-hidden="true"/><div><strong>{runtimeOnline ? "Chat opérationnel" : "Chat en attente"}</strong><small>{twitch.runtimeDetail || `Dernier signal : ${formatDate(twitch.updatedAt)}`}</small></div></article>
@@ -390,8 +492,13 @@ export default function StreamingDashboard({ apiBaseUrl, guildId, csrfToken, nav
 
             <section className="streaming-builtins" aria-labelledby="streaming-builtins-title">
                 <header><div><p className="eyebrow">MODÉRATION PRÉDÉFINIE</p><h2 id="streaming-builtins-title">Commandes Twitch prêtes à l’emploi</h2><p>Réservées aux modérateurs et au diffuseur dans le chat.</p></div>{!moderationReady && <a className="streaming-connect" href={connectUrl}>Autoriser la modération</a>}</header>
-                {!moderationReady && <div className="streaming-scope-warning" role="status">Reconnectez une fois Twitch pour accorder les permissions nécessaires. Les commandes personnalisées restent inchangées.</div>}
+                {!moderationReady && <div className="streaming-scope-warning" role="status"><strong>Autorisations manquantes</strong><ul>{missingModerationScopes.map(permission => <li key={permission.scope}>{permission.label}</li>)}</ul><span>La reconnexion conserve les commandes personnalisées.</span></div>}
                 <div className="streaming-builtins-grid">{TWITCH_MODERATION_COMMANDS.map(([icon, command, description]) => <article key={command}><span aria-hidden="true">{icon}</span><div><strong>{command}</strong><small>{description}</small></div></article>)}</div>
+            </section>
+
+            <section className="streaming-history" aria-labelledby="streaming-history-title">
+                <header><div><p className="eyebrow">JOURNAL BORNÉ</p><h2 id="streaming-history-title">Modération Twitch récente</h2><p>Les 20 dernières actions FyxStream apparaissent ici, sans conserver le motif saisi dans le chat.</p></div><span>{twitch.moderationHistory.length}/20</span></header>
+                {twitch.moderationHistory.length === 0 ? <div className="streaming-history-empty"><span aria-hidden="true">✓</span><p>Aucune action de modération Twitch enregistrée pour ce serveur.</p></div> : <div className="streaming-history-list">{twitch.moderationHistory.map(item => <article key={item.id} className={item.outcome}><span aria-hidden="true">{item.outcome === "success" ? "✓" : "!"}</span><div><strong>{item.title}</strong><p>{item.description}</p></div><time>{formatDate(item.createdAt)}</time></article>)}</div>}
             </section>
 
             <div className="streaming-command-layout">

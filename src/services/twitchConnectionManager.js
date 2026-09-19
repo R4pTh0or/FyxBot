@@ -1,4 +1,5 @@
 const twitchStore = require('../database/twitchStore');
+const { addAuditLog } = require('../database/auditLogStore');
 const { TwitchApiClient } = require('./twitchApi');
 const { TwitchChatClient } = require('./twitchChatClient');
 const { createDefaultTwitchCommands } = require('./twitchCommandRegistry');
@@ -7,6 +8,14 @@ const rootLogger = require('./logger').logger;
 const DEFAULT_STREAM_CACHE_MS = 30_000;
 const BOT_TOKEN_REFRESH_LEEWAY_MS = 5 * 60_000;
 const BOT_TOKEN_REFRESH_RETRY_MS = 60_000;
+const TWITCH_MODERATION_AUDIT_PREFIX = 'FyxStream · ';
+const TWITCH_MODERATION_LABELS = Object.freeze({
+  ban: 'Bannissement',
+  unban: 'Débannissement',
+  timeout: 'Timeout',
+  clear: 'Nettoyage du chat',
+  slow: 'Mode lent',
+});
 
 function publicErrorType(error) {
   if (!error || typeof error !== 'object') return 'UnknownError';
@@ -49,6 +58,7 @@ class TwitchConnectionManager {
       || ((clientOptions) => new TwitchChatClient(clientOptions));
     this.logger = options.logger || rootLogger.child({ component: 'twitch-runtime' });
     this.twitchApi = createRuntimeApi(this.environment, options);
+    this.recordAudit = options.recordAudit || addAuditLog;
     this.streamCacheMs = Number.isInteger(options.streamCacheMs)
       ? Math.max(0, options.streamCacheMs)
       : DEFAULT_STREAM_CACHE_MS;
@@ -328,7 +338,9 @@ class TwitchConnectionManager {
 
   async #moderateChat(entry, request) {
     if (!entry || this.entries.get(entry.guildId) !== entry || entry.stopping || !this.twitchApi) {
-      return 'La modération Twitch est temporairement indisponible.';
+      const detail = 'La modération Twitch est temporairement indisponible.';
+      if (entry) await this.#recordModeration(entry, request, false, detail);
+      return detail;
     }
 
     const requiredScope = request.action === 'clear'
@@ -338,7 +350,9 @@ class TwitchConnectionManager {
         : 'moderator:manage:banned_users';
     const connection = await this.store.getTwitchConnection(entry.guildId, this.storeOptions);
     if (!connection || !Array.isArray(connection.scopes) || !connection.scopes.includes(requiredScope)) {
-      return 'Reconnectez Twitch depuis le panel FyxBot pour activer les commandes de modération.';
+      const detail = `Autorisation manquante : ${requiredScope}. Reconnectez Twitch depuis le panel FyxBot.`;
+      await this.#recordModeration(entry, request, false, detail);
+      return detail;
     }
 
     const broadcasterId = connection.broadcasterUserId;
@@ -346,7 +360,9 @@ class TwitchConnectionManager {
     try {
       if (request.action === 'clear') {
         await this.#helixAuthenticated(entry, `moderation/chat?${query}`, { method: 'DELETE' });
-        return '🧹 Le chat Twitch a été effacé.';
+        const detail = '🧹 Le chat Twitch a été effacé.';
+        await this.#recordModeration(entry, request, true, detail);
+        return detail;
       }
       if (request.action === 'slow') {
         const body = request.seconds === 0
@@ -357,21 +373,33 @@ class TwitchConnectionManager {
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(body),
         });
-        return request.seconds === 0
+        const detail = request.seconds === 0
           ? '🐢 Le mode lent Twitch est désactivé.'
           : `🐢 Mode lent Twitch réglé sur ${request.seconds} seconde(s).`;
+        await this.#recordModeration(entry, request, true, detail);
+        return detail;
       }
 
       const target = await this.#twitchUser(entry, request.targetLogin);
-      if (!target) return `Utilisateur Twitch @${request.targetLogin} introuvable.`;
-      if (target.id === broadcasterId) return 'Le diffuseur ne peut pas être modéré par cette commande.';
+      if (!target) {
+        const detail = `Utilisateur Twitch @${request.targetLogin} introuvable.`;
+        await this.#recordModeration(entry, request, false, detail);
+        return detail;
+      }
+      if (target.id === broadcasterId) {
+        const detail = 'Le diffuseur ne peut pas être modéré par cette commande.';
+        await this.#recordModeration(entry, request, false, detail);
+        return detail;
+      }
       if (request.action === 'unban') {
         await this.#helixAuthenticated(
           entry,
           `moderation/bans?${query}&user_id=${encodeURIComponent(target.id)}`,
           { method: 'DELETE' },
         );
-        return `✅ @${target.login} n’est plus banni ni en timeout.`;
+        const detail = `✅ @${target.login} n’est plus banni ni en timeout.`;
+        await this.#recordModeration(entry, request, true, detail);
+        return detail;
       }
 
       const data = { user_id: target.id };
@@ -382,16 +410,44 @@ class TwitchConnectionManager {
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ data }),
       });
-      return request.action === 'timeout'
+      const detail = request.action === 'timeout'
         ? `⏳ @${target.login} est en timeout pour ${request.durationSeconds} seconde(s).`
         : `🔨 @${target.login} a été banni du chat.`;
+      await this.#recordModeration(entry, request, true, detail);
+      return detail;
     } catch (error) {
       this.logger.warn({
         guildId: entry.guildId,
         action: request.action,
         errorType: publicErrorType(error),
       }, '[FyxBot] Action de modération Twitch refusée.');
-      return 'Twitch a refusé cette action. Vérifiez les permissions et réessayez.';
+      const detail = 'Twitch a refusé cette action. Vérifiez les permissions et réessayez.';
+      await this.#recordModeration(entry, request, false, detail);
+      return detail;
+    }
+  }
+
+  async #recordModeration(entry, request, success, detail) {
+    const action = String(request?.action || 'unknown').toLowerCase();
+    const actor = String(request?.message?.username || 'modérateur').replace(/^@/, '').slice(0, 25);
+    const target = String(request?.targetLogin || '').replace(/^@/, '').slice(0, 25);
+    const duration = action === 'timeout' && Number.isInteger(request?.durationSeconds)
+      ? ` · ${request.durationSeconds}s`
+      : action === 'slow' && Number.isInteger(request?.seconds)
+        ? ` · ${request.seconds}s`
+        : '';
+    const description = [
+      `Par @${actor}${target ? ` · cible @${target}` : ''}${duration}.`,
+      success ? 'Action appliquée par Twitch.' : String(detail || 'Action refusée.').slice(0, 240),
+    ].join(' ');
+    try {
+      await this.recordAudit(entry.guildId, {
+        title: `${TWITCH_MODERATION_AUDIT_PREFIX}${TWITCH_MODERATION_LABELS[action] || 'Modération'}`,
+        description,
+        color: success ? 0x57f287 : 0xed4245,
+      });
+    } catch (error) {
+      this.logger.warn({ guildId: entry.guildId, errorType: publicErrorType(error) }, '[FyxBot] Historique de modération Twitch non enregistré.');
     }
   }
 

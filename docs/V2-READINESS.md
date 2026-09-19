@@ -17,7 +17,7 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [x] Stockage PostgreSQL disponible avec repli SQLite contrôlé.
 - [x] Sauvegardes chiffrées et tests automatisés de restauration.
 - [x] Journalisation structurée et contrôles d'accès du panel.
-- [x] Suite locale validée : 278 tests bot et 5 tests panel, lint, types et build.
+- [x] Suite locale validée : 279 tests bot et 5 tests panel, lint, types et build.
 - [ ] Mettre à jour automatiquement l'état du projet et la liste des commandes.
 - [x] Relier le dossier source `C:\Fyxbot` au dépôt GitHub FyxBot ; le dépôt Git vide imbriqué dans `dashboard` a été sauvegardé localement avant son retrait.
 - [ ] Effectuer un exercice réel de restauration R2 sans modifier la production.
@@ -39,10 +39,10 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [x] Connexion OAuth Twitch et stockage chiffré des jetons.
 - [x] Chat IRC, commandes personnalisées et protections de base.
 - [x] Commandes de modération `!mod`, `!ban`, `!unban`, `!timeout`, `!clear` et `!slow`.
-- [ ] Afficher précisément les autorisations manquantes et proposer la reconnexion.
-- [ ] Conserver un journal borné des actions de modération Twitch.
+- [x] Afficher précisément les autorisations manquantes et proposer la reconnexion.
+- [x] Conserver un journal borné des vingt dernières actions de modération Twitch, sans enregistrer le motif saisi dans le chat.
 - [ ] Tester le parcours complet sur une chaîne Twitch de développement.
-- [ ] Alerter le propriétaire si la connexion ou le renouvellement OAuth échoue.
+- [x] Alerter le propriétaire si la connexion expire ou si le parcours OAuth échoue.
 
 ## 4. Free et Premium
 

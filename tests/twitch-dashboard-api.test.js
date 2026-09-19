@@ -8,7 +8,10 @@ const { PermissionFlagsBits } = require('discord.js');
 const { database, initializeTwitchSchema } = require('../src/database/database');
 const { getTwitchConnectionTokens } = require('../src/database/twitchStore');
 const { startDashboardServer } = require('../src/services/dashboardServer');
-const { TWITCH_BROADCASTER_SCOPES } = require('../src/services/twitchDashboardService');
+const {
+  TWITCH_BROADCASTER_SCOPES,
+  publicTwitchStatus,
+} = require('../src/services/twitchDashboardService');
 const { TwitchTokenVault } = require('../src/services/twitchTokenVault');
 
 const GUILD_A = '111111111111111111';
@@ -94,6 +97,7 @@ async function startTestApi(t, dependencyOverrides = {}) {
       apiClient,
       environment: { DASHBOARD_PUBLIC_URL: 'http://127.0.0.1:3000/v2' },
       storeOptions: { targetDatabase, vault },
+      getAuditLogs: async () => [],
       ...dependencyOverrides,
     },
   });
@@ -119,6 +123,48 @@ async function apiRequest(baseUrl, path, session, init = {}) {
     },
   });
 }
+
+test('décrit les autorisations Twitch manquantes et borne le journal de modération', async () => {
+  const moderationEntries = Array.from({ length: 24 }, (_, index) => ({
+    id: index + 1,
+    title: `FyxStream · Action ${index + 1}`,
+    description: `Action ${index + 1} enregistrée.`,
+    color: index % 2 === 0 ? 0x57f287 : 0xed4245,
+    createdAt: new Date(Date.now() - index * 1_000).toISOString(),
+  }));
+  const store = {
+    getTwitchConnection: async () => ({
+      broadcasterUserId: '123',
+      broadcasterLogin: 'chaine_test',
+      broadcasterDisplayName: 'Chaîne Test',
+      scopes: ['moderator:manage:banned_users'],
+      expiresAt: new Date(Date.now() + 60_000).toISOString(),
+      expired: false,
+      enabled: true,
+    }),
+    getTwitchRuntimeStatus: async () => ({ status: 'connected', detail: null }),
+    getTwitchChatConfig: async () => ({ enabled: true, prefix: '!', protections: {} }),
+    listTwitchCustomCommands: async () => [],
+  };
+
+  const status = await publicTwitchStatus(GUILD_A, {
+    store,
+    getAuditLogs: async () => [
+      ...moderationEntries,
+      { id: 99, title: 'Discord · Bannissement', description: 'Hors Twitch', color: 0xed4245, createdAt: new Date().toISOString() },
+    ],
+  });
+
+  assert.equal(status.authorization.reconnectRequired, true);
+  assert.deepEqual(status.authorization.missingPermissions, [
+    { scope: 'moderator:manage:chat_messages', label: 'Effacer les messages du chat' },
+    { scope: 'moderator:manage:chat_settings', label: 'Modifier le mode lent du chat' },
+  ]);
+  assert.equal(status.moderationHistory.length, 20);
+  assert.equal(status.moderationHistory[0].title, 'Action 1');
+  assert.equal(status.moderationHistory[0].outcome, 'success');
+  assert.equal(status.moderationHistory.some((entry) => entry.description === 'Hors Twitch'), false);
+});
 
 test('protège tout le parcours Twitch par session, serveur administrable, CSRF et authentification récente', async (t) => {
   const previous = {
@@ -226,6 +272,8 @@ test('relie Twitch sans réseau réel, chiffre les jetons et ne les renvoie jama
   assert.deepEqual(status.broadcaster, { id: '12345678', login: 'chaine_test', displayName: 'Chaîne Test' });
   assert.equal(status.connected, true);
   assert.equal(status.chat.prefix, '!');
+  assert.equal(status.authorization.reconnectRequired, false);
+  assert.deepEqual(status.authorization.missingPermissions, []);
 
   const replay = await apiRequest(
     baseUrl,
@@ -287,6 +335,8 @@ test('configure le chat et gère le cycle complet des commandes sur le seul serv
   const expiredBroadcasterPayload = await expiredBroadcasterStatus.json();
   assert.equal(expiredBroadcasterPayload.expired, true);
   assert.equal(expiredBroadcasterPayload.chatEnabled, true);
+  assert.equal(expiredBroadcasterPayload.authorization.reconnectRequired, true);
+  assert.match(expiredBroadcasterPayload.authorization.reconnectReason, /expiré/i);
 
   const reserved = await apiRequest(baseUrl, '/api/twitch/commands', sessionA, {
     method: 'POST', body: JSON.stringify({ guildId: GUILD_A, action: 'add', name: 'discord', response: 'Collision' }),
