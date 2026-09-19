@@ -351,7 +351,7 @@ function validateId(value, allowedIds, label) {
   return value;
 }
 
-function setupCurrentSnapshot(guild, channels, roles) {
+function setupCurrentSnapshot(guild, channels, roles, memberAccessRoleName = null) {
   const channelList = [...channels.values()].filter(Boolean);
   const categoryList = channelList.filter((channel) => channel.type === ChannelType.GuildCategory);
   const regularChannels = channelList.filter((channel) => channel.type !== ChannelType.GuildCategory);
@@ -360,6 +360,7 @@ function setupCurrentSnapshot(guild, channels, roles) {
     roles: roleList.length,
     categories: categoryList.length,
     channels: regularChannels.length,
+    memberAccessRoleName,
     resettable: {
       roles: roleList.filter((role) => role.editable).map((role) => role.name),
       categories: categoryList.filter((channel) => channel.deletable).map((channel) => channel.name),
@@ -447,7 +448,12 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
   const setupSimulation = buildSetupSimulation({
     analysis: setupAnalysis,
     blueprint: setupBlueprint,
-    current: setupCurrentSnapshot(fullGuild, channels, roles),
+    current: setupCurrentSnapshot(
+      fullGuild,
+      channels,
+      roles,
+      roles.get(rulesConfig?.verifiedRoleId)?.name || null,
+    ),
   });
   const channelNames = new Map(channels.filter(Boolean).map((channel) => [channel.id, channel.name]));
   const publishedMessages = await listPublishedMessages(fullGuild.id);
@@ -1844,7 +1850,12 @@ function startDashboardServer(client, options = {}) {
           const simulation = buildSetupSimulation({
             analysis,
             blueprint,
-            current: setupCurrentSnapshot(fullGuild, currentChannels, currentRoles),
+            current: setupCurrentSnapshot(
+              fullGuild,
+              currentChannels,
+              currentRoles,
+              currentRoles.get(state.config.rules?.verifiedRoleId)?.name || null,
+            ),
           });
           await recordChange(state.guild.id, {
             actorId: session.user.id,

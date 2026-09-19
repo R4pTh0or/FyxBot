@@ -10,7 +10,7 @@ const {
   recordChange,
 } = require('../src/database/changeHistoryStore');
 const { buildContentLibrary } = require('../src/services/contentLibrary');
-const { buildSetupSimulation } = require('../src/services/setupSimulation');
+const { buildPermissionPreview, buildSetupSimulation } = require('../src/services/setupSimulation');
 const { withoutServerSetupPreview } = require('../src/database/serverSetupStore');
 
 function historyDatabase() {
@@ -82,12 +82,36 @@ test('respecte un serveur vide dans les projections FyxPilot', () => {
   assert.equal(simulation.plans.reset.deletes, 0);
 });
 
+test('prévisualise les permissions finales par catégorie et par rôle', () => {
+  const preview = buildPermissionPreview({
+    roles: [
+      { key: 'member', name: '👤 Membre' },
+      { key: 'moderator', name: '🛡️ Modérateur', staff: true },
+    ],
+    categories: [
+      { key: 'welcome', name: '📌 ACCUEIL', permissionProfile: 'publicReadOnly' },
+      { key: 'community', name: '💬 COMMUNAUTÉ', permissionProfile: 'publicCommunity' },
+      { key: 'staff', name: '🔐 STAFF', permissionProfile: 'staffOnly' },
+    ],
+    channels: [
+      { key: 'announcements', category: 'community', name: '📣・annonces', permissionProfile: 'memberReadOnly' },
+    ],
+  }, { memberAccessRoleName: '✅ Vérifié' });
+
+  assert.equal(preview.find((item) => item.key === 'welcome').access.find((item) => item.role === '@everyone').label, 'Lecture seule');
+  assert.equal(preview.find((item) => item.key === 'community').access.find((item) => item.role === '@everyone').label, 'Masqué');
+  assert.equal(preview.find((item) => item.key === 'community').access.find((item) => item.role === '✅ Vérifié').label, 'Lecture et écriture');
+  assert.equal(preview.find((item) => item.key === 'staff').access.find((item) => item.role === '✅ Vérifié').label, 'Masqué');
+  assert.equal(preview.find((item) => item.key === 'staff').access.find((item) => item.role === '🛡️ Modérateur').label, 'Lecture, écriture et modération');
+  assert.equal(preview.find((item) => item.key === 'community').channelOverrides[0].name, '📣・annonces');
+});
+
 test('compte séparément catégories, salons et rôles gérables dans la structure Discord', () => {
   const dashboardServerSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'dashboardServer.js'), 'utf8');
   assert.match(dashboardServerSource, /categories: categoryList\.length/);
   assert.match(dashboardServerSource, /channels: regularChannels\.length/);
   assert.match(dashboardServerSource, /roles: roleList\.length/);
-  assert.match(dashboardServerSource, /setupCurrentSnapshot\(fullGuild, currentChannels, currentRoles\)/);
+  assert.match(dashboardServerSource, /setupCurrentSnapshot\(\s*fullGuild,\s*currentChannels,\s*currentRoles,/);
   assert.doesNotMatch(dashboardServerSource, /categories: categories\.size/);
 });
 
@@ -96,6 +120,7 @@ test('affiche la projection et les suppressions propres au mode choisi', () => {
   assert.match(dashboardSource, /plan\.projected\.roles/);
   assert.match(dashboardSource, /mode === "reset" \? simulation\.removals : \[\]/);
   assert.match(dashboardSource, /Aucune suppression avec cette action/);
+  assert.match(dashboardSource, /PERMISSIONS FINALES/);
 });
 
 test('réunit les contenus éditables sans inclure le changelog officiel', () => {

@@ -240,6 +240,16 @@ type SetupSimulation = {
     permissionChanges: string[];
     preserved: string[];
     removals: string[];
+    permissionPreview: {
+        key: string;
+        name: string;
+        profile: string;
+        access: { role: string; label: string; tone: "hidden" | "read" | "write" | "control" }[];
+        channelOverrides: {
+            name: string;
+            access: { role: string; label: string; tone: "hidden" | "read" | "write" | "control" }[];
+        }[];
+    }[];
     totalChanges: number;
     plans: Record<SetupMode, {
         risk: "low" | "guarded" | "critical";
@@ -766,6 +776,33 @@ function FyxVisionWorkspace({ simulation, mode }: { simulation: SetupSimulation;
                     {mode !== "reset" && preserved.length === 0 && <p>Aucun élément personnel détecté.</p>}
                 </section>
             </div>
+            <section className="fyxvision-permissions">
+                <div className="fyxvision-permissions-head">
+                    <div>
+                        <p className="eyebrow">PERMISSIONS FINALES</p>
+                        <h3>Accès prévus par catégorie et par rôle</h3>
+                    </div>
+                    <small>Les salons sans exception héritent de leur catégorie.</small>
+                </div>
+                <div className="fyxvision-permission-grid">
+                    {simulation.permissionPreview.map(category => <article key={category.key}>
+                        <h4>{category.name}</h4>
+                        <div className="permission-access-list">
+                            {category.access.map(item => <div key={`${category.key}-${item.role}`}>
+                                <span>{item.role}</span>
+                                <strong className={`permission-${item.tone}`}>{item.label}</strong>
+                            </div>)}
+                        </div>
+                        {category.channelOverrides.length > 0 && <details>
+                            <summary>{category.channelOverrides.length} exception(s) de salon</summary>
+                            {category.channelOverrides.map(channel => <div className="permission-channel-override" key={channel.name}>
+                                <b>{channel.name}</b>
+                                {channel.access.map(item => <small key={`${channel.name}-${item.role}`}>{item.role} : {item.label}</small>)}
+                            </div>)}
+                        </details>}
+                    </article>)}
+                </div>
+            </section>
             <div className="fyxtwin-plan">
                 <strong>Simulation de l’action sélectionnée</strong>
                 <span>{plan.creates} création(s)</span>

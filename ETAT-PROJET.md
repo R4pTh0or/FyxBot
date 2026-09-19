@@ -86,7 +86,7 @@ annonce publique.
 
 - [x] Aligner le README avec FyxStream et l'état actuel du stockage.
 - [x] Créer une définition vérifiable de la V2.
-- [x] Validation locale complète : syntaxe et types valides, **277 tests bot**,
+- [x] Validation locale complète : syntaxe et types valides, **278 tests bot**,
   **5 tests panel**, lint et build réussis.
 - [x] `C:\Fyxbot` est relié à l'historique GitHub sur la branche locale
   `v2-development-2026-09-19`. Le dépôt vide imbriqué dans `dashboard` a été
@@ -102,7 +102,7 @@ annonce publique.
 - [x] Brouillons de configuration enregistrables et récupérables.
 - [x] Historique détaillé avec auteur, date et résultat.
 - [x] Retour arrière guidé depuis le panel avec confirmation renforcée.
-- [ ] Aperçu complet des permissions finales avant application.
+- [x] Aperçu complet des permissions finales par rôle et catégorie, avec les exceptions de salon.
 
 ### Priorité 3 — FyxStream
 

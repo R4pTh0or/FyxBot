@@ -8,9 +8,10 @@ Les évolutions importantes de FyxBot sont documentées dans ce fichier et sur l
 
 - Documentation alignée sur la version 1.5.0 et checklist V2 centralisée dans `docs/V2-READINESS.md`.
 - Données de test isolées dans un dossier temporaire afin qu'une validation locale ne lise ou ne modifie jamais la base de développement.
-- Validation locale complète : syntaxe, types, 277 tests bot, lint, build et 5 tests panel.
+- Validation locale complète : syntaxe, types, 278 tests bot, lint, build et 5 tests panel.
 - FyxPilot Studio affiche maintenant les ajouts, corrections, éléments conservés et suppressions exactes avant application, avec une projection adaptée à l'action choisie.
 - Les brouillons, l'historique avec auteur et le retour arrière guidé sont intégrés au parcours FyxPilot.
+- Un aperçu des permissions finales détaille l'accès de chaque rôle aux catégories et signale les exceptions propres à certains salons.
 - Préproduction, exercice réel de restauration R2 et période de stabilité requis avant toute annonce 2.0.0.
 
 ### FyxStream intégré
