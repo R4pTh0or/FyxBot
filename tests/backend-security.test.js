@@ -1,17 +1,25 @@
 const assert = require('node:assert/strict');
 const { createHash } = require('node:crypto');
 const test = require('node:test');
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, PermissionsBitField } = require('discord.js');
 const {
+  HttpError,
+  contentDeleteError,
+  deleteTrackedDiscordMessage,
   getDashboardState,
   isLoopbackHost,
   isRequestOriginAllowed,
   messagePublishError,
+  normalizeBotNickname,
   panelErrorResponse,
+  rateLimit,
   requireGuildCapability,
   requireRecentAuthentication,
   revalidateManageableGuildIds,
+  sessionRateLimit,
+  updateGuildBotNickname,
 } = require('../src/services/dashboardServer');
+const { assignableRoleIssue, isSafeAssignableRole } = require('../src/services/safeAssignableRoles');
 const { csrfTokenMatches, getSession, settings, startLogin } = require('../src/services/dashboardAuth');
 const { database } = require('../src/database/database');
 const { isRegisteredRolePanel } = require('../src/services/roleButtons');
@@ -134,7 +142,7 @@ test('exige un jeton CSRF identique à celui de la session', () => {
   assert.equal(csrfTokenMatches({ headers: {} }, session), false);
 });
 
-test('ajoute un jeton CSRF aux anciennes sessions sans prolonger leur expiration', () => {
+test('ajoute un jeton CSRF aux anciennes sessions sans prolonger leur expiration', async () => {
   const token = `ancienne-session-${process.pid}-${Date.now()}`;
   const tokenHash = createHash('sha256').update(token).digest('hex');
   const expiresAt = Date.now() + 60_000;
@@ -144,7 +152,7 @@ test('ajoute un jeton CSRF aux anciennes sessions sans prolonger leur expiration
     expiresAt,
   );
   try {
-    const session = getSession({ headers: { cookie: `fyxbot_session=${token}` } });
+    const session = await getSession({ headers: { cookie: `fyxbot_session=${token}` } });
     assert.match(session.csrfToken, /^[a-f0-9]{64}$/);
     const stored = database.prepare('SELECT value, expires_at FROM dashboard_sessions WHERE token_hash = ?').get(tokenHash);
     assert.equal(JSON.parse(stored.value).csrfToken, session.csrfToken);
@@ -154,7 +162,61 @@ test('ajoute un jeton CSRF aux anciennes sessions sans prolonger leur expiration
   }
 });
 
-test('stocke l’état OAuth haché et utilise les cookies sécurisés __Host en production', () => {
+test('ignore un cookie de session malformé sans rendre le panel indisponible', async () => {
+  await assert.doesNotReject(() => getSession({ headers: { cookie: 'fyxbot_session=%E0%A4%A' } }));
+  assert.equal(await getSession({ headers: { cookie: 'fyxbot_session=%E0%A4%A' } }), null);
+});
+
+test('limite les tentatives OAuth par adresse même si les cookies changent', () => {
+  const request = (attempt) => ({
+    method: 'GET',
+    headers: { cookie: `fyxbot_oauth_state=tentative-${attempt}` },
+    socket: { remoteAddress: '198.51.100.77' },
+  });
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    assert.equal(rateLimit(request(attempt), '/api/auth/login'), null);
+  }
+  assert.ok(rateLimit(request(21), '/api/auth/login') >= 1);
+});
+
+test('limite aussi les mutations avec une identité de session stable', () => {
+  const session = { user: { id: `rate-user-${process.pid}-${Date.now()}` } };
+  for (let attempt = 0; attempt < 45; attempt += 1) {
+    assert.equal(sessionRateLimit(session, 'POST', '/api/config/welcome'), null);
+  }
+  assert.ok(sessionRateLimit(session, 'POST', '/api/config/welcome') >= 1);
+});
+
+test('refuse un rôle automatiquement attribuable devenu administrateur', () => {
+  const botHighest = { comparePositionTo: (role) => 100 - role.position };
+  const actorHighest = { comparePositionTo: (role) => 50 - role.position };
+  const guild = { id: 'guild', members: { me: { roles: { highest: botHighest } } } };
+  const role = {
+    id: 'member-role', name: 'Membre', managed: false, position: 10,
+    permissions: new PermissionsBitField(),
+  };
+  const access = { actorMember: { roles: { highest: actorHighest } }, actorIsOwner: false };
+  assert.equal(isSafeAssignableRole(guild, role, access), true);
+  role.permissions.add(PermissionFlagsBits.Administrator);
+  assert.equal(assignableRoleIssue(guild, role, access), 'dangerous-permissions');
+});
+
+test('refuse un rôle situé au-dessus du configurateur même si FyxBot peut le gérer', () => {
+  const role = {
+    id: 'upper-role', name: 'Responsable', managed: false, position: 60,
+    permissions: new PermissionsBitField(),
+  };
+  const guild = {
+    id: 'guild',
+    members: { me: { roles: { highest: { comparePositionTo: () => 1 } } } },
+  };
+  assert.equal(assignableRoleIssue(guild, role, {
+    actorMember: { roles: { highest: { comparePositionTo: () => -1 } } },
+    actorIsOwner: false,
+  }), 'actor-hierarchy');
+});
+
+test('stocke l’état OAuth haché et utilise les cookies sécurisés __Host en production', async () => {
   const previous = {
     environment: process.env.NODE_ENV,
     clientId: process.env.CLIENT_ID,
@@ -175,7 +237,7 @@ test('stocke l’état OAuth haché et utilise les cookies sécurisés __Host en
   };
   let stateHash;
   try {
-    startLogin(response);
+    await startLogin(response);
     const state = new URL(headers.Location).searchParams.get('state');
     stateHash = createHash('sha256').update(state).digest('hex');
     assert.equal(status, 302);
@@ -341,10 +403,78 @@ test('affiche la raison sûre des requêtes invalides en production', () => {
   assert.equal(response.reference, null);
 });
 
+test('conserve les erreurs de validation explicites et leur statut en production', () => {
+  const response = panelErrorResponse(new HttpError(400, 'Choisissez un salon valide.'), 'production');
+  assert.deepEqual(response, {
+    status: 400,
+    error: 'Choisissez un salon valide.',
+    reference: null,
+  });
+});
+
 test('traduit les refus Discord du constructeur de messages', () => {
   assert.match(messagePublishError(Object.assign(new Error('Missing Access'), { code: 50001 })).message, /voir ce salon/);
   assert.match(messagePublishError(Object.assign(new Error('Invalid Form Body'), { code: 50035 })).message, /format du message/);
   assert.match(messagePublishError(new Error('socket interne indisponible')).message, /Réessayez/);
+});
+
+test('explique précisément les refus Discord lors du retrait d’un contenu', () => {
+  assert.match(contentDeleteError(Object.assign(new Error('Missing Access'), { code: 50001 })).message, /contenant ce message/);
+  assert.match(contentDeleteError(Object.assign(new Error('Missing Permissions'), { code: 50013 })).message, /Gérer les messages/);
+  assert.match(contentDeleteError(new Error('socket interne indisponible')).message, /retirer ce contenu/);
+});
+
+test('normalise le surnom FyxBot sans dépasser la limite Discord', () => {
+  assert.equal(normalizeBotNickname('  Assistant   Minecraft  '), 'Assistant Minecraft');
+  assert.equal(normalizeBotNickname(''), '');
+  assert.throws(() => normalizeBotNickname('x'.repeat(33)), /32 caractères/);
+});
+
+test('modifie uniquement le surnom du bot sur le serveur ciblé', async () => {
+  let applied = null;
+  const member = {
+    nickname: null,
+    permissions: { has: (permission) => permission === PermissionFlagsBits.ChangeNickname },
+    setNickname: async (nickname) => { applied = nickname; member.nickname = nickname; },
+  };
+  const result = await updateGuildBotNickname({ members: { me: member } }, 'Assistant Minecraft');
+  assert.deepEqual(result, { changed: true, nickname: 'Assistant Minecraft' });
+  assert.equal(applied, 'Assistant Minecraft');
+});
+
+test('refuse la personnalisation si FyxBot ne peut pas changer son pseudo', async () => {
+  const member = {
+    nickname: null,
+    permissions: { has: () => false },
+    setNickname: async () => assert.fail('Discord ne doit pas être appelé'),
+  };
+  await assert.rejects(updateGuildBotNickname({ members: { me: member } }, 'Assistant'), /Changer de pseudo/);
+});
+
+test('supprime uniquement un message Discord publié par FyxBot', async () => {
+  let deleted = false;
+  const client = {
+    user: { id: 'fyxbot' },
+    channels: { fetch: async () => ({
+      guildId: 'guild',
+      isTextBased: () => true,
+      messages: { fetch: async () => ({ author: { id: 'fyxbot' }, delete: async () => { deleted = true; } }) },
+    }) },
+  };
+  assert.equal(await deleteTrackedDiscordMessage(client, 'guild', 'channel', 'message'), true);
+  assert.equal(deleted, true);
+});
+
+test('refuse de supprimer un message Discord qui n’appartient pas à FyxBot', async () => {
+  const client = {
+    user: { id: 'fyxbot' },
+    channels: { fetch: async () => ({
+      guildId: 'guild',
+      isTextBased: () => true,
+      messages: { fetch: async () => ({ author: { id: 'member' }, delete: async () => {} }) },
+    }) },
+  };
+  await assert.rejects(deleteTrackedDiscordMessage(client, 'guild', 'channel', 'message'), /n’est pas l’auteur/);
 });
 
 test('masque les erreurs internes en production avec une référence de diagnostic', () => {

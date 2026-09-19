@@ -2,10 +2,6 @@ const crypto = require('node:crypto');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 const { ChannelType, PermissionFlagsBits } = require('discord.js');
-const {
-  getGuildConfigurations,
-  replaceGuildConfigurations,
-} = require('../database/database');
 const { getDataDirectory } = require('../database/dataDirectory');
 const { decodeEncryptionKey, decryptPayload, encryptPayload } = require('./encryptedPayload');
 
@@ -81,17 +77,25 @@ function snapshotChannel(channel) {
   };
 }
 
-async function backupServer(guild) {
+function configurationStore(store) {
+  return store || require('../database/defaultConfigurationStorage');
+}
+
+async function buildServerSnapshot(guild, { store, createdAt = new Date() } = {}) {
   await Promise.all([guild.channels.fetch(), guild.roles.fetch()]);
-  const createdAt = new Date();
-  const snapshot = {
+  return {
     version: 2,
     createdAt: createdAt.toISOString(),
     guild: { id: guild.id, name: guild.name },
-    configurations: getGuildConfigurations(guild.id),
+    configurations: await configurationStore(store).getGuildConfigurations(guild.id),
     roles: [...guild.roles.cache.values()].filter((role) => role.id !== guild.id).map(snapshotRole),
     channels: [...guild.channels.cache.values()].filter((channel) => !channel.isThread?.()).map(snapshotChannel),
   };
+}
+
+async function backupServer(guild, { store } = {}) {
+  const createdAt = new Date();
+  const snapshot = await buildServerSnapshot(guild, { store, createdAt });
   await fs.mkdir(backupDirectory, { recursive: true });
   await fs.chmod(backupDirectory, 0o700).catch(() => null);
   const stamp = createdAt.toISOString().replaceAll(':', '-').replaceAll('.', '-');
@@ -219,6 +223,24 @@ function remapPermissionOverwrites(overwrites, guild, roleIdMap) {
   });
 }
 
+function restorationPermissionOverwrites(overwrites, guild, roleIdMap) {
+  const remapped = remapPermissionOverwrites(overwrites, guild, roleIdMap);
+  const botMemberId = guild.members.me.id;
+  const requiredPermissions = PermissionFlagsBits.ViewChannel | PermissionFlagsBits.ManageChannels;
+  const botOverwrite = remapped.find((overwrite) => overwrite.id === botMemberId && Number(overwrite.type) === 1);
+  if (botOverwrite) {
+    botOverwrite.allow |= requiredPermissions;
+    botOverwrite.deny &= ~requiredPermissions;
+    return remapped;
+  }
+  return [...remapped, {
+    id: botMemberId,
+    type: 1,
+    allow: requiredPermissions,
+    deny: 0n,
+  }];
+}
+
 function remapConfigurationIds(value, idMap) {
   if (typeof value === 'string') return idMap.get(value) || value;
   if (Array.isArray(value)) return value.map((item) => remapConfigurationIds(item, idMap));
@@ -233,7 +255,10 @@ function restorableChannelOptions(savedChannel, guild, roleIdMap, parentId) {
     name: savedChannel.name,
     type: savedChannel.type,
     parent: parentId || undefined,
-    permissionOverwrites: remapPermissionOverwrites(savedChannel.permissionOverwrites, guild, roleIdMap),
+    // Le bot conserve provisoirement l'accès pendant toute la reconstruction.
+    // Les permissions exactes de la sauvegarde sont réappliquées une fois tous
+    // les salons créés, afin qu'une catégorie privée ne bloque pas la suite.
+    permissionOverwrites: restorationPermissionOverwrites(savedChannel.permissionOverwrites, guild, roleIdMap),
     reason: 'Restauration d’une sauvegarde FyxBot',
   };
   if ([ChannelType.GuildText, ChannelType.GuildAnnouncement, ChannelType.GuildForum].includes(savedChannel.type)) {
@@ -258,14 +283,14 @@ function restorableChannelOptions(savedChannel, guild, roleIdMap, parentId) {
   return options;
 }
 
-async function restoreServer(guild, filename) {
+async function restoreServer(guild, filename, { store } = {}) {
   if (!guild.members.me.permissions.has(PermissionFlagsBits.ManageRoles)
     || !guild.members.me.permissions.has(PermissionFlagsBits.ManageChannels)) {
     throw new Error('FyxBot nécessite les permissions Gérer les rôles et Gérer les salons pour restaurer le serveur.');
   }
   const { filename: selectedFilename, snapshot } = await loadServerBackup(guild.id, filename);
   if (String(snapshot.guild?.id) !== String(guild.id)) throw new Error('Cette sauvegarde appartient à un autre serveur.');
-  const safetyBackupFile = await backupServer(guild);
+  const safetyBackupFile = await backupServer(guild, { store });
   let deletedChannels = 0;
   let deletedRoles = 0;
 
@@ -312,12 +337,14 @@ async function restoreServer(guild, filename) {
   }
 
   const channelIdMap = new Map();
+  const restoredChannels = [];
   const savedCategories = (snapshot.channels || [])
     .filter((channel) => channel.type === ChannelType.GuildCategory)
     .sort((left, right) => left.position - right.position);
   for (const savedCategory of savedCategories) {
     const createdCategory = await guild.channels.create(restorableChannelOptions(savedCategory, guild, roleIdMap));
     channelIdMap.set(savedCategory.id, createdCategory.id);
+    restoredChannels.push({ saved: savedCategory, created: createdCategory });
     await createdCategory.setPosition(savedCategory.position).catch(() => null);
   }
   const savedChannels = (snapshot.channels || [])
@@ -327,12 +354,25 @@ async function restoreServer(guild, filename) {
     const parentId = savedChannel.parentId ? channelIdMap.get(savedChannel.parentId) : null;
     const createdChannel = await guild.channels.create(restorableChannelOptions(savedChannel, guild, roleIdMap, parentId));
     channelIdMap.set(savedChannel.id, createdChannel.id);
+    restoredChannels.push({ saved: savedChannel, created: createdChannel });
     await createdChannel.setPosition(savedChannel.position).catch(() => null);
+  }
+
+  const permissionsLast = restoredChannels.sort((left, right) => {
+    const leftIsCategory = left.saved.type === ChannelType.GuildCategory ? 1 : 0;
+    const rightIsCategory = right.saved.type === ChannelType.GuildCategory ? 1 : 0;
+    return leftIsCategory - rightIsCategory;
+  });
+  for (const { saved, created } of permissionsLast) {
+    await created.permissionOverwrites.set(
+      remapPermissionOverwrites(saved.permissionOverwrites, guild, roleIdMap),
+      'Permissions restaurées par FyxBot',
+    );
   }
 
   if (snapshot.version >= 2 && Array.isArray(snapshot.configurations)) {
     const idMap = new Map([...roleIdMap, ...channelIdMap]);
-    replaceGuildConfigurations(guild.id, snapshot.configurations.map((configuration) => ({
+    await configurationStore(store).replaceGuildConfigurations(guild.id, snapshot.configurations.map((configuration) => ({
       section: configuration.section,
       value: remapConfigurationIds(configuration.value, idMap),
     })));
@@ -366,6 +406,7 @@ async function deleteServerBackups(guildId) {
 
 module.exports = {
   backupServer,
+  buildServerSnapshot,
   decodeSnapshot,
   deleteServerBackups,
   getLocalBackupEncryptionKey,
@@ -373,5 +414,6 @@ module.exports = {
   loadServerBackup,
   migrateLegacyLocalBackups,
   remapConfigurationIds,
+  restorationPermissionOverwrites,
   restoreServer,
 };

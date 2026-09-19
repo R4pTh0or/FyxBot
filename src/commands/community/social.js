@@ -88,7 +88,7 @@ module.exports = {
         label: interaction.options.getString('nom') || '',
       });
       if (sources.some((item) => item.id === source.id)) return interaction.reply({ content: 'Cette source est déjà surveillée.', flags: MessageFlags.Ephemeral });
-      assertPremiumLimit(interaction.guildId, 'socialSources', sources.length);
+      await assertPremiumLimit(interaction.guildId, 'socialSources', sources.length);
       if (sources.length >= 10) return interaction.reply({ content: 'La limite technique actuelle est de 10 sources par serveur.', flags: MessageFlags.Ephemeral });
       await setSocialConfig(interaction.guildId, { ...current, sources: [...sources, source], updatedAt: new Date().toISOString() });
       return interaction.reply({ content: `✅ **${source.label}** sera vérifiée automatiquement. La première lecture n’enverra aucune ancienne publication.`, flags: MessageFlags.Ephemeral });

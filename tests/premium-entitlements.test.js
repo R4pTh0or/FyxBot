@@ -41,34 +41,34 @@ test('normalise les identifiants de produits Premium sans accepter une valeur in
   assert.deepEqual(configuredPremiumSkuIds({}), []);
 });
 
-test('utilise uniquement un droit Discord actif du serveur et du produit configurés', () => {
+test('utilise uniquement un droit Discord actif du serveur et du produit configurés', async () => {
   const targetDatabase = createDatabase();
-  upsertPremiumEntitlement(entitlement(), { targetDatabase, now: '2026-08-25T10:01:00.000Z' });
-  const active = getGuildPremiumEntitlementState(GUILD_ID, {
+  await upsertPremiumEntitlement(entitlement(), { targetDatabase, now: '2026-08-25T10:01:00.000Z' });
+  const active = await getGuildPremiumEntitlementState(GUILD_ID, {
     targetDatabase,
     skuIds: [SKU_ID],
     now: '2026-08-25T12:00:00.000Z',
   });
   assert.deepEqual(active, { configured: true, active: true, detected: 1, test: true });
-  assert.equal(getGuildPremiumEntitlementState('444444444444444444', { targetDatabase, skuIds: [SKU_ID] }).active, false);
-  assert.equal(getGuildPremiumEntitlementState(GUILD_ID, { targetDatabase, skuIds: ['555555555555555555'] }).active, false);
+  assert.equal((await getGuildPremiumEntitlementState('444444444444444444', { targetDatabase, skuIds: [SKU_ID] })).active, false);
+  assert.equal((await getGuildPremiumEntitlementState(GUILD_ID, { targetDatabase, skuIds: ['555555555555555555'] })).active, false);
 });
 
-test('reconnaît un abonnement utilisateur Discord sur tous ses serveurs', () => {
+test('reconnaît un abonnement utilisateur Discord sur tous ses serveurs', async () => {
   const targetDatabase = createDatabase();
   const userId = '888888888888888888';
-  upsertPremiumEntitlement(entitlement({ guildId: null, userId }), { targetDatabase, now: '2026-08-25T10:01:00.000Z' });
-  assert.equal(getUserPremiumEntitlementState(userId, { targetDatabase, skuIds: [SKU_ID], now: '2026-08-25T12:00:00.000Z' }).active, true);
-  assert.equal(getUserPremiumEntitlementState('999999999999999999', { targetDatabase, skuIds: [SKU_ID] }).active, false);
+  await upsertPremiumEntitlement(entitlement({ guildId: null, userId }), { targetDatabase, now: '2026-08-25T10:01:00.000Z' });
+  assert.equal((await getUserPremiumEntitlementState(userId, { targetDatabase, skuIds: [SKU_ID], now: '2026-08-25T12:00:00.000Z' })).active, true);
+  assert.equal((await getUserPremiumEntitlementState('999999999999999999', { targetDatabase, skuIds: [SKU_ID] })).active, false);
 });
 
-test('retire l’accès à expiration, suppression ou remboursement de manière idempotente', () => {
+test('retire l’accès à expiration, suppression ou remboursement de manière idempotente', async () => {
   const targetDatabase = createDatabase();
   const ended = entitlement({ endsAt: new Date('2026-08-25T11:00:00.000Z') });
-  upsertPremiumEntitlement(ended, { targetDatabase, now: '2026-08-25T10:01:00.000Z' });
-  assert.equal(getGuildPremiumEntitlementState(GUILD_ID, { targetDatabase, skuIds: [SKU_ID], now: '2026-08-25T12:00:00.000Z' }).active, false);
-  markPremiumEntitlementDeleted(ended, { targetDatabase, now: '2026-08-25T12:01:00.000Z' });
-  markPremiumEntitlementDeleted(ended, { targetDatabase, now: '2026-08-25T12:02:00.000Z' });
+  await upsertPremiumEntitlement(ended, { targetDatabase, now: '2026-08-25T10:01:00.000Z' });
+  assert.equal((await getGuildPremiumEntitlementState(GUILD_ID, { targetDatabase, skuIds: [SKU_ID], now: '2026-08-25T12:00:00.000Z' })).active, false);
+  await markPremiumEntitlementDeleted(ended, { targetDatabase, now: '2026-08-25T12:01:00.000Z' });
+  await markPremiumEntitlementDeleted(ended, { targetDatabase, now: '2026-08-25T12:02:00.000Z' });
   const row = targetDatabase.prepare('SELECT deleted, COUNT(*) OVER () AS total FROM premium_entitlements').get();
   assert.equal(row.deleted, 1);
   assert.equal(row.total, 1);
@@ -76,7 +76,7 @@ test('retire l’accès à expiration, suppression ou remboursement de manière 
 
 test('resynchronise la base depuis l’API Discord et invalide un ancien droit absent', async () => {
   const targetDatabase = createDatabase();
-  upsertPremiumEntitlement(entitlement({ id: '666666666666666666' }), { targetDatabase });
+  await upsertPremiumEntitlement(entitlement({ id: '666666666666666666' }), { targetDatabase });
   const current = entitlement({ id: '777777777777777777', test: false });
   const client = {
     application: {
@@ -101,4 +101,23 @@ test('resynchronise la base depuis l’API Discord et invalide un ancien droit a
 test('ne contacte pas Discord tant qu’aucun produit Premium n’est configuré', async () => {
   const result = await syncPremiumEntitlements({}, { targetDatabase: createDatabase(), skuIds: [] });
   assert.deepEqual(result, { configured: false, synced: 0 });
+});
+
+test('délègue tous les droits Premium au magasin PostgreSQL injecté', async () => {
+  const calls = [];
+  const storage = {
+    upsertPremiumEntitlement: async (_entitlement, options) => {
+      calls.push(options.deleted ? 'deleted' : 'upsert');
+      return { entitlement_id: entitlement().id };
+    },
+    getGuildPremiumEntitlementState: async () => ({ configured: true, active: true, detected: 1, test: false }),
+    getUserPremiumEntitlementState: async () => ({ configured: true, active: false, detected: 0, test: false }),
+    syncPremiumEntitlements: async () => ({ configured: true, synced: 1 }),
+  };
+  await upsertPremiumEntitlement(entitlement(), { storage });
+  await markPremiumEntitlementDeleted(entitlement(), { storage });
+  assert.equal((await getGuildPremiumEntitlementState(GUILD_ID, { storage })).active, true);
+  assert.equal((await getUserPremiumEntitlementState(GUILD_ID, { storage })).active, false);
+  assert.deepEqual(await syncPremiumEntitlements({}, { storage }), { configured: true, synced: 1 });
+  assert.deepEqual(calls, ['upsert', 'deleted']);
 });

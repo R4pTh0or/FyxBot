@@ -21,7 +21,7 @@ module.exports = {
   preserveReplySubcommands: ['activer'],
 
   async execute(interaction) {
-    const state = getGuildPremiumState(interaction.guildId, { userId: interaction.user.id });
+    const state = await getGuildPremiumState(interaction.guildId, { userId: interaction.user.id });
     const subcommand = interaction.options.getSubcommand();
     if (subcommand === 'statut') {
       const founderStatus = state.founder.userActive

@@ -44,7 +44,7 @@ module.exports = {
     const message = await channel.send({ embeds: [embed] });
     await message.react('👍');
     await message.react('👎');
-    addSuggestion({
+    await addSuggestion({
       id: suggestionId,
       guildId: interaction.guildId,
       channelId: channel.id,

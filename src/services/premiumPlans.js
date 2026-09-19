@@ -24,16 +24,20 @@ const PLANS = Object.freeze({
   }),
 });
 
-function getGuildPremiumState(guildId, {
+async function getGuildPremiumState(guildId, {
   userId = null,
   targetDatabase,
+  entitlementStorage,
+  founderStorage,
   now = new Date(),
   skuIds,
 } = {}) {
-  const entitlementOptions = { targetDatabase, now, ...(skuIds ? { skuIds } : {}) };
-  const guildEntitlement = getGuildPremiumEntitlementState(guildId, entitlementOptions);
-  const userEntitlement = getUserPremiumEntitlementState(userId, entitlementOptions);
-  const founder = getFounderProgramState(userId, guildId, { targetDatabase, now });
+  const entitlementOptions = { targetDatabase, storage: entitlementStorage, now, ...(skuIds ? { skuIds } : {}) };
+  const [guildEntitlement, userEntitlement, founder] = await Promise.all([
+    getGuildPremiumEntitlementState(guildId, entitlementOptions),
+    getUserPremiumEntitlementState(userId, entitlementOptions),
+    getFounderProgramState(userId, guildId, { targetDatabase, storage: founderStorage, now }),
+  ]);
   const premiumActive = PREMIUM_ENFORCEMENT_ENABLED && (founder.guildActive || guildEntitlement.active || userEntitlement.active);
   const activePlan = premiumActive ? 'premium' : 'free';
   const entitlementConfigured = guildEntitlement.configured || userEntitlement.configured;
@@ -57,9 +61,9 @@ function getGuildPremiumState(guildId, {
   };
 }
 
-function assertPremiumLimit(guildId, capability, currentCount, options = {}) {
+async function assertPremiumLimit(guildId, capability, currentCount, options = {}) {
   if (!Object.hasOwn(PLAN_LIMITS.free, capability)) throw new Error('Limite Premium inconnue.');
-  const state = getGuildPremiumState(guildId, options);
+  const state = await getGuildPremiumState(guildId, options);
   const limit = state.limits[capability];
   if (Number(currentCount) < limit) return state;
   const labels = {

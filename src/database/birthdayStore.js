@@ -1,11 +1,11 @@
-const { getConfiguration, setConfiguration } = require('./database');
+const defaultStorage = require('./defaultConfigurationStorage');
 
-function getBirthdayConfig(guildId) {
-  return getConfiguration(guildId, 'birthdays');
+async function getBirthdayConfig(guildId, storage = defaultStorage) {
+  return storage.getConfiguration(guildId, 'birthdays');
 }
 
-function setBirthdayConfig(guildId, config) {
-  return setConfiguration(guildId, 'birthdays', config);
+async function setBirthdayConfig(guildId, config, storage = defaultStorage) {
+  return storage.setConfiguration(guildId, 'birthdays', config);
 }
 
 module.exports = { getBirthdayConfig, setBirthdayConfig };

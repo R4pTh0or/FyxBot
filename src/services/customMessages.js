@@ -90,9 +90,17 @@ function customMessagePayload(input = {}) {
   return payload;
 }
 
+function publicMessagePayload(input = {}) {
+  if (input.mode === 'changelog') {
+    throw new Error('Le format changelog est réservé aux annonces automatiques officielles de FyxBot.');
+  }
+  return customMessagePayload({ ...input, mode: 'message', version: '', environment: '' });
+}
+
 module.exports = {
   DEFAULT_COLOR,
   customMessagePayload,
   normalizeHexColor,
   optionalHttpsUrl,
+  publicMessagePayload,
 };

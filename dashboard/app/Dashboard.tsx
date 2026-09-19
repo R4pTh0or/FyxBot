@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
 import releaseManifest from "./release-manifest.json";
+import StreamingDashboard from "./StreamingDashboard";
 type Option = {
     id: string;
     name: string;
@@ -84,6 +85,57 @@ type AuditLog = {
     description: string;
     createdAt: string;
 };
+type ChangeHistory = {
+    id: string;
+    actorName: string;
+    kind: string;
+    title: string;
+    summary: string;
+    details: Record<string, unknown>;
+    reversible: boolean;
+    hasBackup: boolean;
+    status: "applied" | "rolled_back";
+    createdAt: string;
+    rolledBackAt: string | null;
+    rolledBackBy: string | null;
+};
+type ContentLibraryItem = {
+    id: string;
+    kind: string;
+    title: string;
+    description: string;
+    target: string;
+    publicationId?: string;
+    entityId?: string;
+    updatedAt: string | null;
+    editable: boolean;
+    removable: boolean;
+};
+type ContentTrashItem = {
+    id: string;
+    kind: string;
+    title: string;
+    target: string;
+    removedAt: string;
+    expiresAt: string;
+};
+type PublishedMessage = {
+    id: string;
+    messageId: string;
+    channelId: string;
+    channelName: string;
+    content: string;
+    title: string;
+    description: string;
+    color: string;
+    imageUrl: string;
+    thumbnailUrl: string;
+    linkUrl: string;
+    buttonLabel: string;
+    footer: string;
+    createdAt: string;
+    updatedAt: string;
+};
 type CreatorStats = {
     guildCount: number;
     memberCount: number;
@@ -115,12 +167,18 @@ type CreatorStats = {
         activatedWithin24h: number;
         activation24hRate: number | null;
         activeGuilds30d: number;
+        stalledGuilds7d: number;
         averageCompletedSteps: number;
         steps: {
             key: string;
             title: string;
             completedGuilds: number;
             rate: number;
+        }[];
+        completionDistribution: {
+            key: string;
+            title: string;
+            guilds: number;
         }[];
     };
 };
@@ -146,21 +204,49 @@ type SetupAnalysis = {
     };
 };
 type SetupBlueprint = {
+    guildName?: string | null;
     description: string;
     detectedNeeds: string[];
     roles: {
         key: string;
         name: string;
+        color?: number;
+        staff?: boolean;
     }[];
     categories: {
         key: string;
         name: string;
+        permissionProfile?: string;
+    }[];
+    explanations?: {
+        categoryKey: string;
+        name: string;
+        reason: string;
     }[];
     channels: {
         key: string;
+        category: string;
         name: string;
         type: "text" | "voice";
+        permissionProfile?: string;
     }[];
+};
+type SetupSimulation = {
+    previewOnly: true;
+    before: { roles: number; categories: number; channels: number };
+    desired: { roles: number; categories: number; channels: number };
+    additions: string[];
+    movements: string[];
+    permissionChanges: string[];
+    preserved: string[];
+    totalChanges: number;
+    plans: Record<SetupMode, {
+        risk: "low" | "guarded" | "critical";
+        creates: number;
+        updates: number;
+        deletes: number;
+        preserves: number;
+    }>;
 };
 type OnboardingProgress = {
     completedCount: number;
@@ -174,6 +260,14 @@ type OnboardingProgress = {
         target: string;
         complete: boolean;
     }[];
+    recommendedStep: {
+        key: string;
+        title: string;
+        description: string;
+        target: string;
+        complete: boolean;
+    } | null;
+    healthLevel: "new" | "starting" | "progressing" | "ready";
 };
 type PremiumState = {
     plan: "free" | "premium";
@@ -240,6 +334,8 @@ type State = {
         id: string;
         name: string;
         members: number;
+        botNickname: string | null;
+        botDisplayName: string;
     };
     metrics: {
         commands: number;
@@ -247,9 +343,14 @@ type State = {
         securityRules: number;
     };
     recentLogs: AuditLog[];
+    changeHistory: ChangeHistory[];
     recentSuggestions: Suggestion[];
+    publishedMessages: PublishedMessage[];
+    contentLibrary: ContentLibraryItem[];
+    contentTrash: ContentTrashItem[];
     setupBlueprint: SetupBlueprint | null;
     setupAnalysis: SetupAnalysis;
+    setupSimulation: SetupSimulation | null;
     onboarding: OnboardingProgress;
     premium: PremiumState;
     community: {
@@ -261,6 +362,7 @@ type State = {
         voiceChannels: Option[];
         categories: Option[];
         roles: Option[];
+        assignableRoles: Option[];
         members: Option[];
     };
     config: {
@@ -275,17 +377,45 @@ type State = {
         temporaryVoice: TemporaryVoiceConfig | null;
     };
 };
-const icons: Record<string, string> = { "Vue d’ensemble": "🏠", Démarrage: "🚀", Configuration: "⚙️", Modération: "⚔️", Messages: "✉️", Tickets: "🎫", Règlement: "📜", Anniversaires: "🎂", Social: "📣", Communauté: "🤝", Vocaux: "🔊", Accueil: "👋", Rôles: "🎭", Suggestions: "💡", Sécurité: "🛡️", Logs: "🧾", Premium: "💎", "Assistance FyxBot": "🛟", Créateur: "👑" };
+const icons: Record<string, string> = { "Vue d’ensemble": "🏠", Pilotage: "🧭", Modération: "⚔️", Messages: "✉️", Tickets: "🎫", Règlement: "📜", Anniversaires: "🎂", Social: "📣", FyxStream: "🟣", Communauté: "🤝", Vocaux: "🔊", Accueil: "👋", Rôles: "🎭", Suggestions: "💡", Sécurité: "🛡️", Logs: "🧾", Premium: "💎", "Assistance FyxBot": "🛟", Créateur: "👑" };
 const navigationGroups = [
-    { label: "Piloter", items: ["Vue d’ensemble", "Démarrage", "Configuration"] },
+    { label: "Piloter", items: ["Vue d’ensemble", "Pilotage"] },
     { label: "Communauté", items: ["Messages", "Tickets", "Règlement", "Anniversaires", "Social", "Communauté", "Vocaux", "Accueil", "Rôles", "Suggestions"] },
     { label: "Modération et sécurité", items: ["Modération", "Sécurité", "Logs"] },
     { label: "Administration", items: ["Premium", "Assistance FyxBot", "Créateur"] },
 ] as const;
-const mobilePrimaryNavigation = ["Vue d’ensemble", "Démarrage", "Messages", "Communauté"] as const;
+const mobilePrimaryNavigation = ["Vue d’ensemble", "Pilotage", "Messages", "Communauté"] as const;
 const mobilePrimarySet = new Set<string>(mobilePrimaryNavigation);
+type InterfaceMode = "simple" | "advanced";
+type PanelAlert = {
+    id: string;
+    icon: string;
+    title: string;
+    detail: string;
+    target: string;
+    tone: "critical" | "warning" | "info";
+};
+const FYXBOT_INTERFACE_MODE_KEY = "fyxbot:interface-mode";
+const FYXBOT_FAVORITES_KEY = "fyxbot:favorites";
+const SIMPLE_NAVIGATION_ITEMS = new Set([
+    "Vue d’ensemble",
+    "Pilotage",
+    "Messages",
+    "Tickets",
+    "Règlement",
+    "Social",
+    "Communauté",
+    "Sécurité",
+    "Assistance FyxBot",
+]);
+function normalizeDashboardView(view: string) {
+    if (["FyxPilot", "Démarrage", "Configuration"].includes(view))
+        return "Pilotage";
+    if (view === "Streaming")
+        return "FyxStream";
+    return view;
+}
 const API = import.meta.env.VITE_FYXBOT_API_URL?.replace(/\/$/, "") ||
-    import.meta.env.VITE_NEXORA_API_URL?.replace(/\/$/, "") ||
     "/api";
 const CURRENT_RELEASE = releaseManifest.releases.find(release => release.version === releaseManifest.currentVersion)
     ?? releaseManifest.releases[0];
@@ -440,8 +570,10 @@ function CreatorDashboard({ stats, supportStaff, form, update, grantSupportRole,
                 <article><strong>{stats.activation.activationRate}%</strong><small>activation actuelle</small></article>
                 <article><strong>{stats.activation.activeGuilds30d}</strong><small>actifs sur 30 jours</small></article>
                 <article><strong>{activation24h}</strong><small>activation en 24 h</small></article>
+                <article><strong>{stats.activation.stalledGuilds7d}</strong><small>à relancer depuis 7 jours</small></article>
             </div>
             <div className="activation-funnel">{stats.activation.steps.map(step => <article key={step.key}><div><strong>{step.title}</strong><small>{step.completedGuilds}/{stats.guildCount} serveur(s)</small></div><span><i style={{ width: `${Math.max(step.rate, step.completedGuilds ? 4 : 0)}%` }}/></span><b>{step.rate}%</b></article>)}</div>
+            <div className="activation-distribution">{stats.activation.completionDistribution.map(bucket => <article key={bucket.key}><strong>{bucket.guilds}</strong><span>{bucket.title}</span></article>)}</div>
             <p className="activation-note">{stats.activation.eligibleNewGuilds > 0 ? `${stats.activation.activatedWithin24h}/${stats.activation.eligibleNewGuilds} nouveau(x) serveur(s) activé(s) en moins de 24 heures.` : "La cohorte 24 heures commencera avec les prochaines installations ; les anciens serveurs ne sont pas comptés rétroactivement."}{stats.activation.pendingNewGuilds > 0 ? ` ${stats.activation.pendingNewGuilds} installation(s) récente(s) sont encore dans leur fenêtre de 24 heures.` : ""}</p>
         </div>
         <div className="creator-grid">
@@ -452,6 +584,20 @@ function CreatorDashboard({ stats, supportStaff, form, update, grantSupportRole,
         <div className="support-team-panel"><div className="support-team-intro"><div><p className="eyebrow">ÉQUIPE SUPPORT</p><h2>Déléguer les demandes FyxBot</h2><p>Ajoutez un compte Discord avec le niveau strictement nécessaire. Le propriétaire conserve seul la gestion de cette équipe.</p></div><div className="support-role-summary"><article><strong>Modérateur</strong><p>Consulte toutes les demandes, répond et change leur statut.</p></article><article><strong>Administrateur</strong><p>Possède aussi le droit de modifier les priorités.</p></article></div></div><div className="support-team-form"><label>Identifiant Discord<input inputMode="numeric" maxLength={20} value={form.supportStaffUserId || ""} onChange={event => update("supportStaffUserId")(event.target.value.replace(/\D/g, ""))} placeholder="Ex. 123456789012345678"/></label><label>Niveau<select value={form.supportStaffRole || "moderator"} onChange={event => update("supportStaffRole")(event.target.value)}><option value="moderator">Modérateur</option><option value="administrator">Administrateur</option></select></label><label>Confirmation<input value={form.supportStaffConfirmation || ""} onChange={event => update("supportStaffConfirmation")(event.target.value)} placeholder="ACCORDER"/></label><button type="button" disabled={!/^\d{17,20}$/.test(form.supportStaffUserId || "") || form.supportStaffConfirmation !== "ACCORDER"} onClick={grantSupportRole}>Accorder les droits</button></div><div className="support-team-list">{supportStaff.length === 0 ? <p>Aucun compte délégué. Vous restez la seule personne ayant accès à toutes les demandes.</p> : supportStaff.map(member => <article key={member.userId}><span>{member.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{member.displayName}</strong><small>{member.userId} · mis à jour le {new Date(member.updatedAt).toLocaleDateString("fr-FR")}</small></div><b className={member.role}>{member.role === "administrator" ? "Administrateur" : "Modérateur"}</b><button type="button" onClick={() => removeSupportRole(member.userId)}>Retirer</button></article>)}</div></div>
     </section>;
 }
+const MODERATION_COMMANDS = [
+    ["🛡️", "/modhelp", "Afficher toute l’aide"],
+    ["🔨", "/ban", "Bannir un membre"],
+    ["✅", "/unban", "Débannir un membre"],
+    ["👢", "/kick", "Expulser un membre"],
+    ["⏱️", "/timeout", "Exclure temporairement"],
+    ["⚠️", "/warn", "Ajouter un avertissement"],
+    ["📋", "/warnings", "Consulter l’historique"],
+    ["🧹", "/clear", "Nettoyer des messages"],
+    ["🐢", "/slowmode", "Régler le mode lent"],
+    ["🔒", "/lock", "Verrouiller un salon"],
+    ["🔓", "/unlock", "Déverrouiller un salon"],
+] as const;
+
 function ModerationDashboard({ data, form, update, moderate, warnings, loadWarnings, setWarnings }: {
     data: State;
     form: Record<string, string>;
@@ -460,7 +606,7 @@ function ModerationDashboard({ data, form, update, moderate, warnings, loadWarni
     warnings: MemberWarning[] | null;
     loadWarnings: () => Promise<void>;
     setWarnings: (value: MemberWarning[] | null) => void;
-}) { return <section className="moderation-workspace"><div className="management-panel"><div><p className="eyebrow">BOÎTE À OUTILS</p><h2>Modération FyxBot</h2><p>Choisissez un membre et confirmez explicitement chaque sanction.</p></div><div className="command-grid">{[["🔨", "/ban", "Bannir un membre"], ["👢", "/kick", "Expulser un membre"], ["⏱️", "/timeout", "Exclure temporairement"], ["⚠️", "/warn", "Ajouter un avertissement"], ["📋", "/warnings", "Consulter l’historique"], ["🧹", "/clear", "Nettoyer des messages"]].map(([icon, command, label]) => <article key={command}><span>{icon}</span><div><strong>{command}</strong><small>{label}</small></div></article>)}</div><div className="moderation-form"><Select label="Membre" value={form.moderationMemberId || ""} options={data.options.members} onChange={value => { update("moderationMemberId")(value); setWarnings(null); }}/><label>Action<select value={form.moderationAction || "warn"} onChange={e => update("moderationAction")(e.target.value)}><option value="warn">Avertir</option><option value="timeout">Timeout</option><option value="kick">Expulser</option><option value="ban">Bannir</option></select></label><label>Motif<input value={form.moderationReason || ""} onChange={e => update("moderationReason")(e.target.value)} placeholder="Motif obligatoire"/></label><label>Confirmation<input value={form.moderationConfirmation || ""} onChange={e => update("moderationConfirmation")(e.target.value)} placeholder="CONFIRMER"/></label><button disabled={!form.moderationMemberId || !form.moderationReason || form.moderationConfirmation !== "CONFIRMER"} onClick={moderate}>Appliquer la sanction</button></div></div><div className="warning-history"><div><p className="eyebrow">DOSSIER DU MEMBRE</p><h2>Historique des avertissements</h2><p>Sélectionnez un membre puis chargez son historique.</p></div><button disabled={!form.moderationMemberId} onClick={loadWarnings}>Afficher l’historique</button><div className="warning-list">{warnings === null ? <p>Aucun historique chargé.</p> : warnings.length === 0 ? <p>Ce membre ne possède aucun avertissement.</p> : warnings.map(warning => <article key={warning.id}><span>⚠</span><div><strong>{warning.reason}</strong><small>Par {warning.moderatorName} · {new Date(warning.createdAt).toLocaleString("fr-FR")}</small></div><b>{warning.id}</b></article>)}</div></div></section>; }
+}) { return <section className="moderation-workspace"><div className="management-panel"><div><p className="eyebrow">BOÎTE À OUTILS</p><h2>Modération FyxBot</h2><p>Choisissez un membre et confirmez explicitement chaque sanction.</p></div><div className="command-grid">{MODERATION_COMMANDS.map(([icon, command, label]) => <article key={command}><span>{icon}</span><div><strong>{command}</strong><small>{label}</small></div></article>)}</div><div className="moderation-form"><Select label="Membre" value={form.moderationMemberId || ""} options={data.options.members} onChange={value => { update("moderationMemberId")(value); setWarnings(null); }}/><label>Action<select value={form.moderationAction || "warn"} onChange={e => update("moderationAction")(e.target.value)}><option value="warn">Avertir</option><option value="timeout">Timeout</option><option value="kick">Expulser</option><option value="ban">Bannir</option></select></label><label>Motif<input value={form.moderationReason || ""} onChange={e => update("moderationReason")(e.target.value)} placeholder="Motif obligatoire"/></label><label>Confirmation<input value={form.moderationConfirmation || ""} onChange={e => update("moderationConfirmation")(e.target.value)} placeholder="CONFIRMER"/></label><button disabled={!form.moderationMemberId || !form.moderationReason || form.moderationConfirmation !== "CONFIRMER"} onClick={moderate}>Appliquer la sanction</button></div></div><div className="warning-history"><div><p className="eyebrow">DOSSIER DU MEMBRE</p><h2>Historique des avertissements</h2><p>Sélectionnez un membre puis chargez son historique.</p></div><button disabled={!form.moderationMemberId} onClick={loadWarnings}>Afficher l’historique</button><div className="warning-list">{warnings === null ? <p>Aucun historique chargé.</p> : warnings.length === 0 ? <p>Ce membre ne possède aucun avertissement.</p> : warnings.map(warning => <article key={warning.id}><span>⚠</span><div><strong>{warning.reason}</strong><small>Par {warning.moderatorName} · {new Date(warning.createdAt).toLocaleString("fr-FR")}</small></div><b>{warning.id}</b></article>)}</div></div></section>; }
 function safePreviewUrl(value: string) {
     try {
         const url = new URL(value);
@@ -470,56 +616,122 @@ function safePreviewUrl(value: string) {
         return "";
     }
 }
-function MessageComposer({ data, form, update, send }: {
+function MessageComposer({ data, form, update, send, selectPublication, newPublication, openLibraryItem, removeLibraryItem, restoreLibraryItem }: {
     data: State;
     form: Record<string, string>;
     update: (key: string) => (value: string) => void;
     send: () => Promise<void>;
+    selectPublication: (id: string) => void;
+    newPublication: () => void;
+    openLibraryItem: (item: ContentLibraryItem) => void;
+    removeLibraryItem: (item: ContentLibraryItem, confirmation: string) => Promise<boolean>;
+    restoreLibraryItem: (item: ContentTrashItem, confirmation: string) => Promise<boolean>;
 }) {
-    const changelog = (form.messageMode || "changelog") === "changelog";
-    const title = form.messageTitle || (changelog ? "Titre de la mise à jour" : "Titre de l’embed");
+    const [libraryFilter, setLibraryFilter] = useState("all");
+    const [removalItem, setRemovalItem] = useState<ContentLibraryItem | null>(null);
+    const [removalConfirmation, setRemovalConfirmation] = useState("");
+    const [restorationItem, setRestorationItem] = useState<ContentTrashItem | null>(null);
+    const [restorationConfirmation, setRestorationConfirmation] = useState("");
+    const editing = Boolean(form.messagePublicationId);
+    const confirmation = editing ? "MODIFIER" : "PUBLIER";
+    const title = form.messageTitle || "Titre de l’embed";
     const description = form.messageDescription || "Le contenu de votre message apparaîtra ici, comme dans Discord.";
     const color = /^#[0-9a-f]{6}$/i.test(form.messageColor || "") ? form.messageColor : "#ef4444";
     const imageUrl = safePreviewUrl(form.messageImageUrl || "");
     const thumbnailUrl = safePreviewUrl(form.messageThumbnailUrl || "");
     const hasContent = Boolean(form.messageContent || form.messageTitle || form.messageDescription || form.messageImageUrl);
-    const ready = Boolean(form.messageChannelId && hasContent && form.messageConfirmation === "PUBLIER"
-        && (!changelog || (form.messageVersion && form.messageTitle && form.messageDescription)));
-    return <section className="message-workspace">
+    const ready = Boolean(form.messageChannelId && hasContent && form.messageConfirmation === confirmation);
+    const channelName = data.options.textChannels.find(channel => channel.id === form.messageChannelId)?.name || "Salon introuvable";
+    const contentKinds: Record<string, string> = { message: "✉️", rules: "📜", ticket: "🎫", role: "🎭", welcome: "👋", birthdays: "🎂", social: "📣" };
+    const libraryItems = data.contentLibrary.filter(item => libraryFilter === "all" || item.kind === libraryFilter);
+    const trashItems = data.contentTrash || [];
+    function cancelRemoval() {
+        setRemovalItem(null);
+        setRemovalConfirmation("");
+    }
+    async function confirmRemoval() {
+        if (!removalItem || removalConfirmation !== "SUPPRIMER")
+            return;
+        if (await removeLibraryItem(removalItem, removalConfirmation))
+            cancelRemoval();
+    }
+    function cancelRestoration() {
+        setRestorationItem(null);
+        setRestorationConfirmation("");
+    }
+    async function confirmRestoration() {
+        if (!restorationItem || restorationConfirmation !== "RESTAURER")
+            return;
+        if (await restoreLibraryItem(restorationItem, restorationConfirmation))
+            cancelRestoration();
+    }
+    return <section className="message-hub">
+        <div className="content-library-hub">
+            <div className="content-library-head"><div><p className="eyebrow">CENTRE DE CONTENU</p><h2>Toutes vos publications au même endroit</h2><p>Retrouvez, modifiez, retirez ou restaurez les messages, règlements, panneaux et automatisations du serveur.</p></div><strong>{data.contentLibrary.length} actif(s) · {trashItems.length} retiré(s)</strong></div>
+            <div className="content-filters"><button type="button" className={libraryFilter === "all" ? "active" : ""} onClick={() => setLibraryFilter("all")}>Tout</button>{[["message", "Messages"], ["rules", "Règlement"], ["ticket", "Tickets"], ["role", "Rôles"], ["social", "Social"]].map(([kind, label]) => <button type="button" className={libraryFilter === kind ? "active" : ""} key={kind} onClick={() => setLibraryFilter(kind)}>{label}</button>)}<button type="button" className={`content-trash-filter ${libraryFilter === "trash" ? "active" : ""}`} onClick={() => setLibraryFilter("trash")}>🗑️ Corbeille ({trashItems.length})</button></div>
+            {libraryFilter === "trash" ? <div className="content-trash-grid">{trashItems.length === 0 ? <div className="content-trash-empty"><span>🗑️</span><strong>La corbeille est vide</strong><p>Les contenus retirés resteront récupérables ici pendant 30 jours.</p></div> : trashItems.map(item => <article className="content-trash-card" key={item.id}><span aria-hidden="true">{contentKinds[item.kind] || "📄"}</span><div><strong>{item.title}</strong><small>Retiré le {new Date(item.removedAt).toLocaleString("fr-FR")} · expiration le {new Date(item.expiresAt).toLocaleDateString("fr-FR")}</small></div><button type="button" aria-label={`Restaurer ${item.title}`} onClick={() => { setRestorationItem(item); setRestorationConfirmation(""); }}>Restaurer</button></article>)}</div> : <div className="content-library-grid">{libraryItems.length === 0 ? <p>Aucun contenu dans cette catégorie.</p> : libraryItems.map(item => <article className="content-library-card" key={item.id}><button type="button" className="content-library-open" onClick={() => openLibraryItem(item)}><span aria-hidden="true">{contentKinds[item.kind] || "📄"}</span><div><strong>{item.title}</strong><small>{item.description}</small></div><b>{item.kind === "message" ? "Modifier" : "Gérer"} →</b></button>{item.removable && <button type="button" className="content-library-remove" aria-label={`Retirer ${item.title}`} onClick={() => { setRemovalItem(item); setRemovalConfirmation(""); }}>Retirer</button>}</article>)}</div>}
+            {removalItem && <section className="content-removal-panel" aria-label={`Retirer ${removalItem.title}`}><div><p className="eyebrow">ACTION SENSIBLE</p><h3>Retirer « {removalItem.title} » ?</h3><p>Le contenu sera placé dans la corbeille pendant 30 jours. Si un message Discord lui est associé, seul ce message précis sera supprimé. Les salons, rôles et tickets déjà ouverts resteront intacts.</p></div><label>Confirmation<input value={removalConfirmation} onChange={event => setRemovalConfirmation(event.target.value)} placeholder="Écrivez SUPPRIMER"/></label><div><button type="button" className="secondary" onClick={cancelRemoval}>Annuler</button><button type="button" className="danger" disabled={removalConfirmation !== "SUPPRIMER"} onClick={() => void confirmRemoval()}>Placer dans la corbeille</button></div></section>}
+            {restorationItem && <section className="content-restoration-panel" aria-label={`Restaurer ${restorationItem.title}`}><div><p className="eyebrow">RESTAURATION CONTRÔLÉE</p><h3>Restaurer « {restorationItem.title} » ?</h3><p>FyxBot republiera ce contenu dans son salon d’origine. Si ce salon, un rôle ou une configuration nécessaire n’existe plus, la restauration sera refusée sans modifier la corbeille.</p></div><label>Confirmation<input value={restorationConfirmation} onChange={event => setRestorationConfirmation(event.target.value)} placeholder="Écrivez RESTAURER"/></label><div><button type="button" className="secondary" onClick={cancelRestoration}>Annuler</button><button type="button" disabled={restorationConfirmation !== "RESTAURER"} onClick={() => void confirmRestoration()}>Restaurer le contenu</button></div></section>}
+        </div>
+        <div className="message-library"><div><p className="eyebrow">MESSAGES PUBLIÉS</p><h2>Retrouver et modifier une publication</h2><p>FyxBot conserve ici les messages libres envoyés depuis le panel. Les annonces changelog officielles restent gérées automatiquement et ne sont pas accessibles.</p></div><label>Publication<select value={form.messagePublicationId || ""} onChange={event => selectPublication(event.target.value)}><option value="">Nouvelle publication</option>{(data.publishedMessages || []).map(message => <option value={message.id} key={message.id}>{message.title || message.content.slice(0, 50) || "Message sans titre"} · #{message.channelName}</option>)}</select></label><button type="button" onClick={newPublication}>+ Nouveau message</button></div>
+        <section className="message-workspace">
         <div className="message-builder">
-            <div className="message-builder-head"><div><p className="eyebrow">CONSTRUCTEUR DE MESSAGES</p><h2>Créer une publication Discord</h2><p>Combinez texte, embed, image et bouton. Le modèle Changelog reproduit le style de votre exemple.</p></div><span>✉️</span></div>
+            <div className="message-builder-head"><div><p className="eyebrow">CONSTRUCTEUR DE MESSAGES</p><h2>{editing ? "Modifier la publication Discord" : "Créer une publication Discord"}</h2><p>Combinez texte, embed, image et bouton. Chaque message publié pourra être retrouvé puis corrigé ici.</p></div><span>✉️</span></div>
             <div className="message-form-grid">
-                <label>Format<select value={form.messageMode || "changelog"} onChange={e => update("messageMode")(e.target.value)}><option value="changelog">Changelog</option><option value="message">Message libre</option></select></label>
-                <Select label="Salon de publication" value={form.messageChannelId || ""} options={data.options.textChannels} onChange={update("messageChannelId")}/>
-                {changelog && <><label>Version<input value={form.messageVersion || ""} maxLength={100} onChange={e => update("messageVersion")(e.target.value)} placeholder="1.2.0"/></label><label>Environnement<input value={form.messageEnvironment || "production"} maxLength={100} onChange={e => update("messageEnvironment")(e.target.value)} placeholder="production"/></label></>}
-                <label className="full-row">Texte au-dessus de l’embed <small>facultatif</small><textarea value={form.messageContent || ""} maxLength={2000} rows={3} onChange={e => update("messageContent")(e.target.value)} placeholder="@Changelog ou une courte introduction…"/></label>
-                <label className="wide">Titre de l’embed<input value={form.messageTitle || ""} maxLength={changelog ? 250 : 256} onChange={e => update("messageTitle")(e.target.value)} placeholder="Nouvelle mise à jour FyxBot"/></label>
+                {editing ? <label>Salon d’origine<input value={`#${channelName}`} disabled/></label> : <Select label="Salon de publication" value={form.messageChannelId || ""} options={data.options.textChannels} onChange={update("messageChannelId")}/>}
+                <label className="full-row">Texte au-dessus de l’embed <small>facultatif</small><textarea value={form.messageContent || ""} maxLength={2000} rows={3} onChange={e => update("messageContent")(e.target.value)} placeholder="Une courte introduction…"/></label>
+                <label className="wide">Titre de l’embed<input value={form.messageTitle || ""} maxLength={256} onChange={e => update("messageTitle")(e.target.value)} placeholder="Annonce de la communauté"/></label>
                 <label>Couleur<input className="color-field" type="color" value={color} onChange={e => update("messageColor")(e.target.value)}/></label>
-                <label className="full-row">Description de l’embed<textarea value={form.messageDescription || ""} maxLength={4000} rows={7} onChange={e => update("messageDescription")(e.target.value)} placeholder="Expliquez les nouveautés ou votre annonce…"/></label>
-                <label className="wide">Lien HTTPS<input type="url" value={form.messageLinkUrl || ""} onChange={e => update("messageLinkUrl")(e.target.value)} placeholder="https://fyxbot-panel-production.up.railway.app/changelog"/></label>
+                <label className="full-row">Description de l’embed<textarea value={form.messageDescription || ""} maxLength={4000} rows={7} onChange={e => update("messageDescription")(e.target.value)} placeholder="Rédigez votre annonce…"/></label>
+                <label className="wide">Lien HTTPS<input type="url" value={form.messageLinkUrl || ""} onChange={e => update("messageLinkUrl")(e.target.value)} placeholder="https://votre-site.fr/actualite"/></label>
                 <label>Texte du bouton<input value={form.messageButtonLabel || ""} maxLength={80} onChange={e => update("messageButtonLabel")(e.target.value)} placeholder="Voir les détails"/></label>
                 <label className="wide">Grande image HTTPS<input type="url" value={form.messageImageUrl || ""} onChange={e => update("messageImageUrl")(e.target.value)} placeholder="https://…/banniere.png"/></label>
                 <label>Miniature HTTPS<input type="url" value={form.messageThumbnailUrl || ""} onChange={e => update("messageThumbnailUrl")(e.target.value)} placeholder="https://…/logo.png"/></label>
-                <label className="wide">Pied de page<input value={form.messageFooter || ""} maxLength={2048} onChange={e => update("messageFooter")(e.target.value)} placeholder={changelog ? "FyxBot • Changelog" : "FyxBot"}/></label>
-                <label>Confirmation<input value={form.messageConfirmation || ""} onChange={e => update("messageConfirmation")(e.target.value)} placeholder="PUBLIER"/></label>
+                <label className="wide">Pied de page<input value={form.messageFooter || ""} maxLength={2048} onChange={e => update("messageFooter")(e.target.value)} placeholder="Votre communauté"/></label>
+                <label>Confirmation<input value={form.messageConfirmation || ""} onChange={e => update("messageConfirmation")(e.target.value)} placeholder={confirmation}/></label>
             </div>
-            <button className="message-send" disabled={!ready} onClick={send}>Publier dans Discord</button>
+            <button className="message-send" disabled={!ready} onClick={send}>{editing ? "Enregistrer la modification" : "Publier dans Discord"}</button>
         </div>
         <aside className="discord-preview" aria-label="Aperçu Discord">
-            <div className="discord-preview-head"><p className="eyebrow">APERÇU DISCORD</p><span>Le message final sera envoyé par FyxBot</span></div>
-            <div className="discord-message"><div className="discord-avatar">F</div><div className="discord-message-body"><div className="discord-author"><strong>FyxBot</strong><b>APP</b><time>Aujourd’hui à 12:00</time></div>{form.messageContent && <p className="discord-content">{form.messageContent}</p>}<div className="discord-embed" style={{ borderLeftColor: color }}><div className="discord-embed-copy"><strong className={form.messageLinkUrl ? "linked" : ""}>{changelog ? `◆ ${title}` : title}</strong><p>{description}</p>{changelog && <div className="discord-fields"><div><b>Version</b><span>{form.messageVersion || CURRENT_RELEASE.version}</span></div><div><b>Environnement</b><span>{form.messageEnvironment || "production"}</span></div>{form.messageLinkUrl && <div className="wide"><b>Changelog</b><span className="preview-link">Consulter les détails</span></div>}</div>}{form.messageFooter && <small>{form.messageFooter} • maintenant</small>}</div>{thumbnailUrl && <div className="discord-thumbnail" role="img" aria-label="Aperçu de la miniature" style={{ backgroundImage: `url(${JSON.stringify(thumbnailUrl)})` }}/>} {imageUrl && <div className="discord-image" role="img" aria-label="Aperçu de la grande image" style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}/>}</div>{form.messageLinkUrl && form.messageButtonLabel && <button type="button" className="discord-link-button">🔗 {form.messageButtonLabel}</button>}</div></div>
+            <div className="discord-preview-head"><p className="eyebrow">APERÇU DISCORD</p><span>{editing ? "Le message existant sera mis à jour par FyxBot" : "Le message final sera envoyé par FyxBot"}</span></div>
+            <div className="discord-message"><div className="discord-avatar">F</div><div className="discord-message-body"><div className="discord-author"><strong>FyxBot</strong><b>APP</b><time>Aujourd’hui à 12:00</time></div>{form.messageContent && <p className="discord-content">{form.messageContent}</p>}<div className="discord-embed" style={{ borderLeftColor: color }}><div className="discord-embed-copy"><strong className={form.messageLinkUrl ? "linked" : ""}>{title}</strong><p>{description}</p>{form.messageFooter && <small>{form.messageFooter} • maintenant</small>}</div>{thumbnailUrl && <div className="discord-thumbnail" role="img" aria-label="Aperçu de la miniature" style={{ backgroundImage: `url(${JSON.stringify(thumbnailUrl)})` }}/>} {imageUrl && <div className="discord-image" role="img" aria-label="Aperçu de la grande image" style={{ backgroundImage: `url(${JSON.stringify(imageUrl)})` }}/>}</div>{form.messageLinkUrl && form.messageButtonLabel && <button type="button" className="discord-link-button">🔗 {form.messageButtonLabel}</button>}</div></div>
         </aside>
+        </section>
     </section>;
 }
 type SetupMode = "complete" | "synchronize" | "reset";
-function SetupDashboard({ data, form, update, runSetup }: {
+function DiscordServerPreview({ blueprint }: { blueprint: SetupBlueprint }) {
+    const firstTextChannel = blueprint.channels.find(channel => channel.type !== "voice");
+    const staffRoles = blueprint.roles.filter(role => role.staff);
+    const memberRoles = blueprint.roles.filter(role => !role.staff);
+    const roleDot = (role: SetupBlueprint["roles"][number]) => role.color
+        ? `#${role.color.toString(16).padStart(6, "0")}`
+        : "#949ba4";
+    return <section className="discord-server-mock" aria-label="Aperçu Discord de la structure proposée"><div className="discord-server-mock-head"><div><span>APERÇU DISCORD</span><strong>{blueprint.guildName || "Votre serveur"}</strong></div><small>Simulation visuelle · aucune création réelle</small></div><div className="discord-server-window"><aside className="discord-server-rail"><b>F</b><i/><span>+</span></aside><aside className="discord-channel-list"><header>{blueprint.guildName || "Votre serveur"}<span>⌄</span></header><div>{blueprint.categories.map(category => <section key={category.key}><strong>⌄ {category.name}</strong>{blueprint.channels.filter(channel => channel.category === category.key).map(channel => <div className={channel.key === firstTextChannel?.key ? "selected" : ""} key={channel.key}><span>{channel.type === "voice" ? "🔊" : "#"}</span>{channel.name.replace(/^[^・]+・/, "")}</div>)}</section>)}</div><footer><b>F</b><span><strong>FyxBot</strong><small>En ligne</small></span><i>⚙</i></footer></aside><main className="discord-chat-preview"><header><span>#</span>{firstTextChannel?.name.replace(/^[^・]+・/, "") || "bienvenue"}<small>Salon proposé par FyxBot</small></header><div className="discord-chat-empty"><b>{firstTextChannel?.name.match(/^[^・]+/)?.[0] || "👋"}</b><h3>Bienvenue sur {blueprint.guildName || "votre serveur"}</h3><p>Ceci est le début du salon #{firstTextChannel?.name.replace(/^[^・]+・/, "") || "bienvenue"}.</p></div><article><div>F</div><p><strong>FyxBot <span>APP</span></strong><small>Aujourd’hui à 12:00</small><br/>La structure est prête à être vérifiée avant sa création.</p></article></main><aside className="discord-member-preview">{staffRoles.length > 0 && <section><strong>ÉQUIPE — {staffRoles.length}</strong>{staffRoles.map(role => <div key={role.key}><i style={{ backgroundColor: roleDot(role) }}/><span>{role.name}</span></div>)}</section>}<section><strong>RÔLES — {memberRoles.length}</strong>{memberRoles.map(role => <div key={role.key}><i style={{ backgroundColor: roleDot(role) }}/><span>{role.name}</span></div>)}</section></aside></div></section>;
+}
+function BlueprintPreview({ blueprint }: { blueprint: SetupBlueprint }) {
+    const [previewMode, setPreviewMode] = useState<"discord" | "details">("discord");
+    const explanationByCategory = new Map((blueprint.explanations || []).map(item => [item.categoryKey, item.reason]));
+    return <details className="setup-blueprint-preview" open><summary>Prévisualiser la structure proposée</summary><div className="setup-preview-switch" role="group" aria-label="Mode de prévisualisation"><button type="button" className={previewMode === "discord" ? "active" : ""} onClick={() => setPreviewMode("discord")}>Aperçu Discord</button><button type="button" className={previewMode === "details" ? "active" : ""} onClick={() => setPreviewMode("details")}>Liste détaillée</button></div>{previewMode === "discord" ? <DiscordServerPreview blueprint={blueprint}/> : <div className="setup-blueprint-grid"><section><h3>Rôles · {blueprint.roles.length}</h3><ul>{blueprint.roles.map(role => <li key={role.key}>{role.name}</li>)}</ul></section><section><h3>Catégories et salons · {blueprint.channels.length}</h3><div className="setup-category-preview">{blueprint.categories.map(category => { const categoryChannels = blueprint.channels.filter(channel => channel.category === category.key); return <article key={category.key}><strong>{category.name}</strong>{explanationByCategory.get(category.key) && <small>{explanationByCategory.get(category.key)}</small>}<ul>{categoryChannels.map(channel => <li key={channel.key}><span>{channel.type === "voice" ? "Vocal" : "Texte"}</span>{channel.name}</li>)}</ul></article>; })}</div></section></div>}<p>Aucun rôle, catégorie ou salon n’est créé tant que vous ne confirmez pas l’action située plus bas.</p></details>;
+}
+function FyxVisionWorkspace({ simulation, mode }: { simulation: SetupSimulation; mode: SetupMode }) {
+    const [twinOpen, setTwinOpen] = useState(true);
+    const plan = simulation.plans[mode];
+    const riskLabels = { low: "Faible", guarded: "Surveillé", critical: "Critique" } as const;
+    return <section className="fyxvision-workspace"><header><div><p className="eyebrow">FYXVISION + FYXTWIN</p><h2>Voyez l’impact avant de toucher à Discord</h2><p>Le jumeau simule le résultat à partir de la structure actuelle. Aucune action Discord n’est exécutée ici.</p></div><button type="button" onClick={() => setTwinOpen(open => !open)}>{twinOpen ? "Masquer" : "Afficher"} la simulation</button></header>{twinOpen && <><div className="fyxtwin-stats"><article><span>RÔLES</span><strong>{simulation.before.roles} → {simulation.desired.roles}</strong></article><article><span>CATÉGORIES</span><strong>{simulation.before.categories} → {simulation.desired.categories}</strong></article><article><span>SALONS</span><strong>{simulation.before.channels} → {simulation.desired.channels}</strong></article><article className={`risk-${plan.risk}`}><span>RISQUE</span><strong>{riskLabels[plan.risk]}</strong></article></div><div className="fyxvision-diff"><section><h3>+ Ajouts · {simulation.additions.length}</h3>{simulation.additions.slice(0, 8).map(item => <span className="added" key={item}>{item}</span>)}{simulation.additions.length === 0 && <p>Aucun élément manquant.</p>}</section><section><h3>↔ Corrections · {simulation.movements.length + simulation.permissionChanges.length}</h3>{[...simulation.movements, ...simulation.permissionChanges].slice(0, 8).map(item => <span className="updated" key={item}>{item}</span>)}{simulation.movements.length + simulation.permissionChanges.length === 0 && <p>Aucune correction nécessaire.</p>}</section><section><h3>✓ Conservés · {simulation.preserved.length}</h3>{simulation.preserved.slice(0, 8).map(item => <span className="preserved" key={item}>{item}</span>)}{simulation.preserved.length === 0 && <p>Aucun élément personnel détecté.</p>}</section></div><div className="fyxtwin-plan"><strong>Simulation de l’action sélectionnée</strong><span>{plan.creates} création(s)</span><span>{plan.updates} correction(s)</span><span className={plan.deletes ? "danger" : ""}>{plan.deletes} suppression(s)</span><span>{plan.preserves} élément(s) conservé(s)</span></div></>}</section>;
+}
+function SetupDashboard({ data, form, update, runSetup, deletePreview, saveNickname }: {
     data: State;
     form: Record<string, string>;
     update: (key: string) => (value: string) => void;
     runSetup: (mode: SetupMode | "design") => Promise<void>;
+    deletePreview: () => Promise<void>;
+    saveNickname: (nickname: string, confirmation: string) => Promise<void>;
 }) {
+    const [isDesigning, setIsDesigning] = useState(false);
     const analysis = data.setupAnalysis;
     const blueprint = data.setupBlueprint;
+    const simulation = data.setupSimulation;
     const mode = (form.setupMode || (analysis.recommendation === "complete" ? "complete" : "synchronize")) as SetupMode;
     const expected = mode === "reset" ? "TOUT SUPPRIMER" : mode === "synchronize" ? "SYNCHRONISER" : "COMPLETER";
     const labels: Record<SetupMode, {
@@ -533,13 +745,79 @@ function SetupDashboard({ data, form, update, runSetup }: {
     };
     const missing = [...analysis.missingRoles, ...analysis.missingCategories, ...analysis.missingChannels, ...analysis.misplacedChannels];
     const extras = [...analysis.extraRoles, ...analysis.extraCategories, ...analysis.extraChannels];
-    return <section className="setup-workspace"><div className="setup-designer"><div><p className="eyebrow">SERVEUR SUR MESURE</p><h2>Décrivez ce que vous voulez</h2><p>Aucun profil n’est imposé. Expliquez l’objectif du serveur, son public, ses activités et les fonctions nécessaires. FyxBot proposera les rôles, catégories et salons adaptés.</p></div><label>Description libre<textarea rows={5} maxLength={1000} value={form.setupDescription || ""} onChange={event => update("setupDescription")(event.target.value)} placeholder="Ex. Je crée un serveur Minecraft survie avec une équipe de builders, des candidatures, des tickets et des salons vocaux temporaires…"/></label><button className="setup-button" disabled={(form.setupDescription || "").trim().length < 20} onClick={() => runSetup("design")}>Générer l’aperçu</button>{blueprint && <div className="setup-proposal"><strong>Proposition prête</strong><span>{blueprint.roles.length} rôles · {blueprint.categories.length} catégories · {blueprint.channels.length} salons</span><small>{blueprint.detectedNeeds.join(" · ")}</small></div>}</div><div className="setup-audit"><div><p className="eyebrow">AUDIT DU SERVEUR</p><h2>{data.guild.name}</h2><p>{blueprint ? "FyxBot compare le serveur à votre proposition personnalisée avant toute action." : "Décrivez d’abord le serveur pour remplacer l’analyse générique par votre proposition personnalisée."}</p>{analysis.uneditableRoles.length > 0 && <p className="setup-warning">⚠️ Placez le rôle FyxBot au-dessus de {analysis.uneditableRoles.join(", ")} pour permettre leur correction.</p>}</div><div className="setup-metrics"><article><span>MANQUANTS</span><strong>{analysis.totals.missing}</strong><small>{missing.slice(0, 3).join(" · ") || "Structure complète"}</small></article><article><span>PERMISSIONS</span><strong>{analysis.totals.permissionIssues}</strong><small>{analysis.permissionIssues.slice(0, 3).join(" · ") || "Permissions conformes"}</small></article><article><span>CONSERVÉS</span><strong>{analysis.totals.extras}</strong><small>{extras.slice(0, 3).join(" · ") || "Aucun élément supplémentaire"}</small></article></div></div><div className={`setup-action ${mode === "reset" ? "danger-panel" : ""}`}><div><p className="eyebrow">ACTION RECOMMANDÉE</p><h2>{blueprint ? analysis.recommendation === "complete" ? "Compléter la structure" : analysis.recommendation === "synchronize" ? "Corriger les permissions" : analysis.recommendation === "hierarchy" ? "Corriger la hiérarchie des rôles" : "Structure déjà exploitable" : "Aucune proposition appliquable"}</h2><p>{!blueprint ? "Générez un aperçu ci-dessus avant de pouvoir modifier Discord." : analysis.recommendation === "hierarchy" ? "Discord bloque les rôles supérieurs à FyxBot. Déplacez le rôle du bot puis relancez Réparer et synchroniser." : labels[mode].description}</p></div><label>Action<select value={mode} onChange={event => { update("setupMode")(event.target.value); update("setupConfirmation")(''); }}><option value="complete">Compléter sans supprimer</option><option value="synchronize">Réparer et synchroniser</option><option value="reset">Tout sauvegarder et reconstruire</option></select></label><label>Confirmation<input value={form.setupConfirmation || ""} onChange={event => update("setupConfirmation")(event.target.value)} placeholder={`Écrivez ${expected}`}/></label><button className={`setup-button ${mode === "reset" ? "danger-button" : ""}`} disabled={!blueprint || form.setupConfirmation !== expected} onClick={() => runSetup(mode)}>{labels[mode].action}</button></div></section>;
+    const desiredNickname = (form.botNickname || "").trim();
+    const nicknameConfirmation = desiredNickname ? "PERSONNALISER" : "REINITIALISER";
+    const nicknameChanged = desiredNickname !== (data.guild.botNickname || "");
+    async function designServer() {
+        setIsDesigning(true);
+        try {
+            await runSetup("design");
+        }
+        finally {
+            setIsDesigning(false);
+        }
+    }
+    return <section className="setup-workspace"><div className="bot-identity-settings"><div className="bot-identity-preview"><span>F</span><div><p className="eyebrow">IDENTITÉ SUR CE SERVEUR</p><h2>{desiredNickname || "FyxBot"}</h2><small>Application FyxBot · surnom visible uniquement sur {data.guild.name}</small></div></div><div className="bot-identity-form"><label>Surnom du bot<input value={form.botNickname || ""} maxLength={32} onChange={event => { update("botNickname")(event.target.value); update("botNicknameConfirmation")(''); }} placeholder="Laisser vide pour afficher FyxBot"/></label><label>Confirmation<input value={form.botNicknameConfirmation || ""} onChange={event => update("botNicknameConfirmation")(event.target.value)} placeholder={`Écrivez ${nicknameConfirmation}`}/></label><button type="button" disabled={!nicknameChanged || form.botNicknameConfirmation !== nicknameConfirmation} onClick={() => saveNickname(desiredNickname, form.botNicknameConfirmation || "")}>{desiredNickname ? "Appliquer le surnom" : "Revenir à FyxBot"}</button></div><p>Le nom global, le badge d’application et les liens officiels restent FyxBot afin que les membres puissent toujours identifier le bot.</p></div><div className="setup-designer"><div><p className="eyebrow">SERVEUR SUR MESURE</p><h2>Décrivez ce que vous voulez</h2><p>Aucun profil n’est imposé. Expliquez l’objectif du serveur, son public, ses activités et les fonctions nécessaires. FyxBot proposera les rôles, catégories et salons adaptés.</p></div><label>Description libre<textarea rows={5} maxLength={1000} value={form.setupDescription || ""} onChange={event => update("setupDescription")(event.target.value)} placeholder="Ex. Je crée un serveur Minecraft survie avec une équipe de builders, des candidatures, des tickets et des salons vocaux temporaires…"/></label><button className="setup-button" disabled={(form.setupDescription || "").trim().length < 20 || isDesigning} onClick={designServer}>{isDesigning ? "Génération en cours…" : "Générer l’aperçu"}</button>{blueprint && <div className="setup-proposal"><div className="setup-proposal-head"><div><strong>Proposition prête</strong><span>{blueprint.roles.length} rôles · {blueprint.categories.length} catégories · {blueprint.channels.length} salons</span></div><button type="button" onClick={deletePreview}>Supprimer l’aperçu</button></div><small>{blueprint.detectedNeeds.join(" · ")}</small>{blueprint.explanations?.length ? <ul className="setup-reasons">{blueprint.explanations.slice(0, 6).map(item => <li key={item.categoryKey}><b>{item.name}</b><span>{item.reason}</span></li>)}</ul> : null}<BlueprintPreview blueprint={blueprint}/></div>}</div><div className="setup-audit"><div><p className="eyebrow">AUDIT DU SERVEUR</p><h2>{data.guild.name}</h2><p>{blueprint ? "FyxBot compare le serveur à votre proposition personnalisée avant toute action." : "Décrivez d’abord le serveur pour remplacer l’analyse générique par votre proposition personnalisée."}</p>{analysis.uneditableRoles.length > 0 && <p className="setup-warning">⚠️ Placez le rôle FyxBot au-dessus de {analysis.uneditableRoles.join(", ")} pour permettre leur correction.</p>}</div><div className="setup-metrics"><article><span>MANQUANTS</span><strong>{analysis.totals.missing}</strong><small>{missing.slice(0, 3).join(" · ") || "Structure complète"}</small></article><article><span>PERMISSIONS</span><strong>{analysis.totals.permissionIssues}</strong><small>{analysis.permissionIssues.slice(0, 3).join(" · ") || "Permissions conformes"}</small></article><article><span>CONSERVÉS</span><strong>{analysis.totals.extras}</strong><small>{extras.slice(0, 3).join(" · ") || "Aucun élément supplémentaire"}</small></article></div></div>{simulation && <FyxVisionWorkspace simulation={simulation} mode={mode}/>}<div className={`setup-action ${mode === "reset" ? "danger-panel" : ""}`}><div><p className="eyebrow">ACTION RECOMMANDÉE</p><h2>{blueprint ? analysis.recommendation === "complete" ? "Compléter la structure" : analysis.recommendation === "synchronize" ? "Corriger les permissions" : analysis.recommendation === "hierarchy" ? "Corriger la hiérarchie des rôles" : "Structure déjà exploitable" : "Aucune proposition appliquable"}</h2><p>{!blueprint ? "Générez un aperçu ci-dessus avant de pouvoir modifier Discord." : analysis.recommendation === "hierarchy" ? "Discord bloque les rôles supérieurs à FyxBot. Déplacez le rôle du bot puis relancez Réparer et synchroniser." : labels[mode].description}</p></div><label>Action<select value={mode} onChange={event => { update("setupMode")(event.target.value); update("setupConfirmation")(''); }}><option value="complete">Compléter sans supprimer</option><option value="synchronize">Réparer et synchroniser</option><option value="reset">Tout sauvegarder et reconstruire</option></select></label><label>Confirmation<input value={form.setupConfirmation || ""} onChange={event => update("setupConfirmation")(event.target.value)} placeholder={`Écrivez ${expected}`}/></label><button className={`setup-button ${mode === "reset" ? "danger-button" : ""}`} disabled={!blueprint || form.setupConfirmation !== expected} onClick={() => runSetup(mode)}>{labels[mode].action}</button></div></section>;
 }
 function OnboardingDashboard({ data, navigate }: {
     data: State;
     navigate: (target: string) => void;
 }) {
-    return <section className="onboarding-workspace"><div className="onboarding-summary"><div><p className="eyebrow">PARCOURS GUIDÉ</p><h2>{data.onboarding.complete ? "Votre configuration essentielle est prête" : "Préparons votre serveur étape par étape"}</h2><p>{data.onboarding.completedCount}/{data.onboarding.totalCount} étapes terminées sur {data.guild.name}.</p></div><strong>{data.onboarding.percent}%</strong><div className="onboarding-progress"><i style={{ width: `${data.onboarding.percent}%` }}/></div></div><div className="onboarding-steps">{data.onboarding.steps.map((step, index) => <article className={step.complete ? "complete" : ""} key={step.key}><span>{step.complete ? "✓" : index + 1}</span><div><strong>{step.title}</strong><p>{step.description}</p></div><button onClick={() => navigate(step.target)}>{step.complete ? "Vérifier" : "Configurer"}</button></article>)}</div></section>;
+    const recommended = data.onboarding.recommendedStep;
+    const healthLabels = { new: "Nouveau serveur", starting: "Fondations en cours", progressing: "Configuration avancée", ready: "Serveur prêt" };
+    return <section className="onboarding-workspace"><div className="onboarding-summary"><div><p className="eyebrow">FYXJOURNEY · PARCOURS GUIDÉ</p><h2>{data.onboarding.complete ? "Votre configuration essentielle est prête" : "Préparons votre serveur étape par étape"}</h2><p>{data.onboarding.completedCount}/{data.onboarding.totalCount} étapes terminées sur {data.guild.name}.</p><span className={`journey-health ${data.onboarding.healthLevel}`}>{healthLabels[data.onboarding.healthLevel]}</span></div><strong>{data.onboarding.percent}%</strong><div className="onboarding-progress"><i style={{ width: `${data.onboarding.percent}%` }}/></div></div>{recommended && <div className="journey-next"><span>PROCHAINE ACTION RECOMMANDÉE</span><div><strong>{recommended.title}</strong><p>{recommended.description}</p></div><button type="button" onClick={() => navigate(recommended.target)}>Continuer →</button></div>}<div className="onboarding-steps">{data.onboarding.steps.map((step, index) => <article className={step.complete ? "complete" : recommended?.key === step.key ? "recommended" : ""} key={step.key}><span>{step.complete ? "✓" : index + 1}</span><div><strong>{step.title}</strong><p>{step.description}</p></div><button onClick={() => navigate(step.target)}>{step.complete ? "Vérifier" : "Configurer"}</button></article>)}</div></section>;
+}
+function FyxPilotDashboard({ data, rollback, navigate }: {
+    data: State;
+    rollback: (changeId: string, confirmation: string) => Promise<void>;
+    navigate: (target: string) => void;
+}) {
+    const [selectedId, setSelectedId] = useState("");
+    const [confirmation, setConfirmation] = useState("");
+    const selected = data.changeHistory.find(change => change.id === selectedId);
+    const reversible = data.changeHistory.filter(change => change.reversible && change.status === "applied").length;
+    const kindIcons: Record<string, string> = { design: "🧠", structure: "🏗️", rollback: "↩️", content: "✉️", configuration: "⚙️", security: "🛡️" };
+    async function confirmRollback() {
+        if (!selected || confirmation !== "RESTAURER") return;
+        await rollback(selected.id, confirmation);
+        setSelectedId("");
+        setConfirmation("");
+    }
+    return <section className="fyxpilot-workspace"><div className="fyxpilot-hero"><div><p className="eyebrow">FYXPILOT STUDIO</p><h2>Construire, comprendre et annuler</h2><p>Chaque action importante est expliquée. Les modifications structurelles possèdent une sauvegarde permettant un retour arrière contrôlé.</p></div><div><article><strong>{data.changeHistory.length}</strong><small>changements récents</small></article><article><strong>{reversible}</strong><small>retours arrière disponibles</small></article><button type="button" onClick={() => navigate("Configuration")}>Préparer une modification</button></div></div><div className="fyxpilot-layout"><div className="fyxpilot-timeline"><header><div><p className="eyebrow">HISTORIQUE</p><h3>Chronologie du serveur</h3></div><span>Les sauvegardes restent privées</span></header>{data.changeHistory.length === 0 ? <p className="fyxpilot-empty">Les prochaines modifications effectuées depuis le panel apparaîtront ici.</p> : data.changeHistory.map(change => <article className={`${change.status} ${selectedId === change.id ? "selected" : ""}`} key={change.id}><span className="fyxpilot-kind" aria-hidden="true">{kindIcons[change.kind] || "●"}</span><div><strong>{change.title}</strong><p>{change.summary}</p><small>{change.actorName} · {new Date(change.createdAt).toLocaleString("fr-FR")}</small>{change.status === "rolled_back" && <em>Annulé{change.rolledBackBy ? ` par ${change.rolledBackBy}` : ""}</em>}</div>{change.reversible && change.status === "applied" ? <button type="button" onClick={() => { setSelectedId(change.id); setConfirmation(""); }}>Retour arrière</button> : <b>{change.kind === "design" ? "Aperçu" : change.status === "rolled_back" ? "Annulé" : "Enregistré"}</b>}</article>)}</div><aside className="fyxpilot-safety"><p className="eyebrow">RETOUR ARRIÈRE</p>{selected ? <><h3>{selected.title}</h3><p>FyxBot restaurera l’état enregistré avant cette modification. Les rôles et salons actuels seront reconstruits depuis la sauvegarde.</p><div className="safety-warning">Administrateur doit être accordé temporairement à FyxBot pour restaurer les salons privés, puis retiré immédiatement.</div><label>Confirmation<input value={confirmation} onChange={event => setConfirmation(event.target.value)} placeholder="Écrivez RESTAURER"/></label><button type="button" className="danger-button" disabled={confirmation !== "RESTAURER"} onClick={() => void confirmRollback()}>Restaurer cet état</button><button type="button" className="secondary" onClick={() => { setSelectedId(""); setConfirmation(""); }}>Annuler</button></> : <><h3>Aucune restauration sélectionnée</h3><p>Choisissez une modification marquée « Retour arrière » dans la chronologie. Les simples contenus restent modifiables depuis leur module.</p><button type="button" onClick={() => navigate("Messages")}>Ouvrir le centre de contenu</button></>}</aside></div></section>;
+}
+type PilotageSection = "journey" | "setup" | "history";
+function PilotageDashboard({ data, form, update, runSetup, deletePreview, saveNickname, rollback, navigate }: {
+    data: State;
+    form: Record<string, string>;
+    update: (key: string) => (value: string) => void;
+    runSetup: (mode: SetupMode | "design") => Promise<void>;
+    deletePreview: () => Promise<void>;
+    saveNickname: (nickname: string, confirmation: string) => Promise<void>;
+    rollback: (changeId: string, confirmation: string) => Promise<void>;
+    navigate: (target: string) => void;
+}) {
+    const [section, setSection] = useState<PilotageSection>("journey");
+    const openTarget = (target: string) => {
+        if (target === "Démarrage") {
+            setSection("journey");
+            return;
+        }
+        if (target === "Configuration") {
+            setSection("setup");
+            return;
+        }
+        if (target === "FyxPilot") {
+            setSection("history");
+            return;
+        }
+        navigate(target);
+    };
+    const tabs: { id: PilotageSection; icon: string; label: string; detail: string }[] = [
+        { id: "journey", icon: "🚀", label: "Parcours guidé", detail: "Les prochaines étapes" },
+        { id: "setup", icon: "⚙️", label: "Configuration", detail: "Structure et permissions" },
+        { id: "history", icon: "↩️", label: "Historique", detail: "FyxPilot et retours arrière" },
+    ];
+    return <section className="pilotage-workspace"><header className="pilotage-intro"><div><p className="eyebrow">FYXPILOT · CENTRE DE CONFIGURATION</p><h2>Un seul espace pour construire et faire évoluer votre serveur</h2><p>Suivez le parcours recommandé, adaptez la structure Discord et retrouvez chaque modification réversible.</p></div><strong>{data.onboarding.percent}%<small>configuration terminée</small></strong></header><div className="pilotage-tabs" role="tablist" aria-label="Outils de pilotage">{tabs.map(tab => <button type="button" role="tab" aria-selected={section === tab.id} className={section === tab.id ? "active" : ""} key={tab.id} onClick={() => setSection(tab.id)}><span aria-hidden="true">{tab.icon}</span><div><strong>{tab.label}</strong><small>{tab.detail}</small></div></button>)}</div><div className="pilotage-content" role="tabpanel">{section === "journey" && <OnboardingDashboard data={data} navigate={openTarget}/>} {section === "setup" && <SetupDashboard data={data} form={form} update={update} runSetup={runSetup} deletePreview={deletePreview} saveNickname={saveNickname}/>} {section === "history" && <FyxPilotDashboard data={data} rollback={rollback} navigate={openTarget}/>}</div></section>;
 }
 function PremiumDashboard({ premium, guildName, activate, busy }: {
     premium: PremiumState;
@@ -565,16 +843,26 @@ function CommunityDashboard({ data, form, update, createEvent, createGiveaway, n
 }) {
     return <section className="community-hub"><div><p className="eyebrow">OUTILS COMMUNAUTAIRES</p><h2>Faire participer les membres</h2><p>Programmez les rendez-vous et gérez les concours depuis le panel ou avec <code>/communaute</code>.</p></div><div className="community-cards"><article><span>📊</span><h3>Sondages Discord</h3><p>Publiez un sondage natif avec 2 à 4 choix grâce à <code>/communaute sondage</code>.</p></article><article><span>🔊</span><h3>Salons privés temporaires</h3><p>Les membres créent leur propre vocal, automatiquement supprimé quand il est vide.</p><button onClick={() => navigate("Vocaux")}>Configurer les vocaux</button></article><article><span>📡</span><h3>Notifications automatiques</h3><p>Surveillez YouTube et Twitch puis annoncez uniquement les nouveaux contenus.</p><button onClick={() => navigate("Social")}>Configurer les réseaux</button></article></div><div className="settings community-settings community-builder"><div><p className="eyebrow">ÉVÉNEMENT DISCORD</p><h2>Programmer un rendez-vous</h2><p>L’événement apparaît dans la liste native de Discord avec son heure et son lieu.</p></div><label>Titre<input maxLength={100} value={form.communityEventName || ""} onChange={e => update("communityEventName")(e.target.value)} placeholder="Soirée communautaire"/></label><label>Date<input value={form.communityEventDate || ""} onChange={e => update("communityEventDate")(e.target.value)} placeholder="JJ/MM/AAAA"/></label><label>Heure<input value={form.communityEventTime || ""} onChange={e => update("communityEventTime")(e.target.value)} placeholder="20:30"/></label><label>Type<select value={form.communityEventType || "external"} onChange={e => update("communityEventType")(e.target.value)}><option value="external">Lieu ou lien externe</option><option value="voice">Salon vocal Discord</option></select></label><Select label="Salon vocal" value={form.communityEventVoiceChannelId || ""} options={[{ id: "", name: "Aucun" }, ...data.options.voiceChannels]} onChange={update("communityEventVoiceChannelId")}/><label>Lieu ou lien<input maxLength={100} value={form.communityEventLocation || "Discord"} onChange={e => update("communityEventLocation")(e.target.value)} placeholder="Discord"/></label><label>Durée<select value={form.communityEventDuration || "60"} onChange={e => update("communityEventDuration")(e.target.value)}><option value="30">30 minutes</option><option value="60">1 heure</option><option value="120">2 heures</option><option value="240">4 heures</option></select></label><label>Fuseau<select value={form.communityEventTimezone || "Europe/Paris"} onChange={e => update("communityEventTimezone")(e.target.value)}><option value="Europe/Paris">France métropolitaine</option><option value="UTC">UTC</option><option value="America/Montreal">Montréal</option><option value="Indian/Reunion">La Réunion</option></select></label><label className="wide full-row">Description<textarea rows={4} maxLength={1000} value={form.communityEventDescription || ""} onChange={e => update("communityEventDescription")(e.target.value)} placeholder="Présentez le programme et les informations utiles…"/></label><label>Confirmation<input value={form.communityEventConfirmation || ""} onChange={e => update("communityEventConfirmation")(e.target.value)} placeholder="PROGRAMMER"/></label><button disabled={!form.communityEventName || !form.communityEventDate || !form.communityEventTime || form.communityEventConfirmation !== "PROGRAMMER" || (form.communityEventType === "voice" && !form.communityEventVoiceChannelId)} onClick={() => void createEvent()}>Programmer l’événement</button></div><div className="settings community-settings community-builder"><div><p className="eyebrow">CONCOURS AUTOMATIQUE</p><h2>Faire gagner un lot</h2><p>Une participation par membre. Le tirage est automatique et les identifiants des participants sont supprimés après le résultat.</p></div><label>Lot<input maxLength={200} value={form.communityGiveawayPrize || ""} onChange={e => update("communityGiveawayPrize")(e.target.value)} placeholder="Un mois de grade VIP"/></label><Select label="Salon" value={form.communityGiveawayChannelId || ""} options={data.options.textChannels} onChange={update("communityGiveawayChannelId")}/><label>Durée<select value={form.communityGiveawayDuration || "1440"} onChange={e => update("communityGiveawayDuration")(e.target.value)}><option value="10">10 minutes</option><option value="60">1 heure</option><option value="360">6 heures</option><option value="1440">24 heures</option><option value="4320">3 jours</option><option value="10080">7 jours</option></select></label><label>Gagnants<select value={form.communityGiveawayWinners || "1"} onChange={e => update("communityGiveawayWinners")(e.target.value)}>{[1, 2, 3, 4, 5].map(value => <option key={value} value={value}>{value}</option>)}</select></label><label>Confirmation<input value={form.communityGiveawayConfirmation || ""} onChange={e => update("communityGiveawayConfirmation")(e.target.value)} placeholder="PUBLIER"/></label><button disabled={!form.communityGiveawayPrize || !form.communityGiveawayChannelId || form.communityGiveawayConfirmation !== "PUBLIER"} onClick={() => void createGiveaway()}>Publier le concours</button></div><div className="community-live-grid"><article><p className="eyebrow">ÉVÉNEMENTS À VENIR</p><h2>{data.community.events.length}</h2>{data.community.events.length === 0 ? <small>Aucun événement programmé.</small> : data.community.events.map(event => <a key={event.id} href={event.url} target="_blank" rel="noreferrer"><strong>{event.name}</strong><small>{event.scheduledStartAt ? new Date(event.scheduledStartAt).toLocaleString("fr-FR") : "Date non disponible"}</small></a>)}</article><article><p className="eyebrow">CONCOURS ACTIFS</p><h2>{data.community.giveaways.length}</h2>{data.community.giveaways.length === 0 ? <small>Aucun concours actif.</small> : data.community.giveaways.map(giveaway => <div key={giveaway.giveawayId}><strong>{giveaway.prize}</strong><small>{giveaway.participantCount} participant(s) · tirage {new Date(giveaway.endsAt).toLocaleString("fr-FR")}</small></div>)}</article></div></section>;
 }
-function SocialDashboard({ data, form, update, save, publish, manageSource }: {
+function SocialDashboard({ data, form, update, save, publish, manageSource, selectSource, cancelSource, navigate }: {
     data: State;
     form: Record<string, string>;
     update: (key: string) => (value: string) => void;
     save: () => void;
     publish: () => Promise<void>;
-    manageSource: (action: "add" | "remove", sourceId?: string) => Promise<void>;
+    manageSource: (action: "add" | "update" | "remove", sourceId?: string) => Promise<void>;
+    selectSource: (sourceId: string) => void;
+    cancelSource: () => void;
+    navigate: (target: string) => void;
 }) {
     const sources = data.config.social?.sources || [];
-    return <section className="community-workspace"><div className="settings community-settings"><div><p className="eyebrow">NOTIFICATIONS SOCIALES</p><h2>Canal de diffusion</h2><p>Choisissez où annoncer les lives et les nouvelles vidéos.</p></div><Select label="Salon des notifications" value={form.socialChannelId || ""} options={data.options.textChannels} onChange={update("socialChannelId")}/><Select label="Rôle à notifier" value={form.socialRoleId || ""} options={[{ id: "", name: "Aucun rôle" }, ...data.options.roles]} onChange={update("socialRoleId")}/><span /><button disabled={!form.socialChannelId} onClick={save}>Enregistrer</button></div><div className="settings community-settings social-source-builder"><div><p className="eyebrow">SURVEILLANCE AUTOMATIQUE</p><h2>Ajouter une chaîne</h2><p>YouTube utilise l’identifiant public UC… ; Twitch utilise le nom de la chaîne. La première lecture reste silencieuse.</p></div><label>Plateforme<select value={form.socialSourcePlatform || "youtube"} onChange={e => update("socialSourcePlatform")(e.target.value)}><option value="youtube">YouTube</option><option value="twitch">Twitch</option></select></label><label>Identifiant<input value={form.socialSourceIdentifier || ""} onChange={e => update("socialSourceIdentifier")(e.target.value)} placeholder={form.socialSourcePlatform === "twitch" ? "nom_de_chaine" : "UCxxxxxxxxxxxxxxxxxxxxxx"}/></label><label>Nom affiché<input value={form.socialSourceLabel || ""} onChange={e => update("socialSourceLabel")(e.target.value)} placeholder="Ma chaîne"/></label><button disabled={!data.config.social?.channelId || !form.socialSourceIdentifier} onClick={() => void manageSource("add")}>Ajouter la surveillance</button></div><div className="social-source-list"><div><p className="eyebrow">SOURCES ACTIVES</p><h2>{sources.length} chaîne(s) surveillée(s)</h2></div>{sources.length === 0 ? <p>Aucune source automatique pour le moment.</p> : sources.map(source => <article key={source.id}><span>{source.platform === "youtube" ? "▶️" : "🟣"}</span><div><strong>{source.label}</strong><small>{source.identifier} · {source.status || "en attente"}</small>{source.lastError && <em>{source.lastError}</em>}</div><button onClick={() => void manageSource("remove", source.id)}>Retirer</button></article>)}</div><div className="settings community-settings social-publisher"><div><p className="eyebrow">ANNONCE MANUELLE</p><h2>Informer la communauté</h2><p>La publication manuelle reste disponible pour les autres plateformes.</p></div><label>Type<select value={form.socialType || "live"} onChange={e => update("socialType")(e.target.value)}><option value="live">Lancement d’un live</option><option value="video">Nouvelle vidéo</option></select></label><label>Plateforme<select value={form.socialPlatform || "YouTube"} onChange={e => update("socialPlatform")(e.target.value)}><option>YouTube</option><option>Twitch</option><option>TikTok</option><option>Instagram</option><option>Kick</option><option>Autre plateforme</option></select></label><label>Créateur<input value={form.socialCreator || ""} onChange={e => update("socialCreator")(e.target.value)} placeholder="Nom du créateur"/></label><label>Titre<input value={form.socialTitle || ""} onChange={e => update("socialTitle")(e.target.value)} placeholder="Titre du live ou de la vidéo"/></label><label className="wide">Lien HTTPS<input type="url" value={form.socialUrl || ""} onChange={e => update("socialUrl")(e.target.value)} placeholder="https://…"/></label><label>Confirmation<input value={form.socialNotifyConfirmation || ""} onChange={e => update("socialNotifyConfirmation")(e.target.value)} placeholder="NOTIFIER"/></label><button disabled={form.socialNotifyConfirmation !== "NOTIFIER" || !form.socialCreator || !form.socialTitle || !form.socialUrl || !data.config.social} onClick={publish}>Publier la notification</button></div></section>;
+    const editingSourceId = form.socialSourceId || "";
+    return <section className="community-workspace">
+        <div className="social-tabs" role="tablist" aria-label="Réseaux et streaming"><button type="button" role="tab" aria-selected="true">Notifications</button><button type="button" role="tab" aria-selected="false" onClick={() => navigate("FyxStream")}>Ouvrir FyxStream</button></div>
+        <div className="settings community-settings"><div><p className="eyebrow">NOTIFICATIONS SOCIALES</p><h2>Canal de diffusion</h2><p>Choisissez où annoncer les lives et les nouvelles vidéos.</p></div><Select label="Salon des notifications" value={form.socialChannelId || ""} options={data.options.textChannels} onChange={update("socialChannelId")}/><Select label="Rôle à notifier" value={form.socialRoleId || ""} options={[{ id: "", name: "Aucun rôle" }, ...data.options.roles]} onChange={update("socialRoleId")}/><span /><button disabled={!form.socialChannelId} onClick={save}>Enregistrer</button></div>
+        <div className="settings community-settings social-source-builder"><div><p className="eyebrow">SURVEILLANCE AUTOMATIQUE</p><h2>{editingSourceId ? "Modifier la chaîne" : "Ajouter une chaîne"}</h2><p>YouTube utilise l’identifiant public UC… ; Twitch utilise le nom de la chaîne. Changer l’identifiant relance le suivi depuis le début.</p></div><label>Plateforme<select value={form.socialSourcePlatform || "youtube"} onChange={e => update("socialSourcePlatform")(e.target.value)}><option value="youtube">YouTube</option><option value="twitch">Twitch</option></select></label><label>Identifiant<input value={form.socialSourceIdentifier || ""} onChange={e => update("socialSourceIdentifier")(e.target.value)} placeholder={form.socialSourcePlatform === "twitch" ? "nom_de_chaine" : "UCxxxxxxxxxxxxxxxxxxxxxx"}/></label><label>Nom affiché<input value={form.socialSourceLabel || ""} onChange={e => update("socialSourceLabel")(e.target.value)} placeholder="Ma chaîne"/></label><div className="social-source-builder-actions"><button disabled={!data.config.social?.channelId || !form.socialSourceIdentifier} onClick={() => void manageSource(editingSourceId ? "update" : "add", editingSourceId)}>{editingSourceId ? "Enregistrer" : "Ajouter la surveillance"}</button>{editingSourceId && <button type="button" className="secondary" onClick={cancelSource}>Annuler</button>}</div></div>
+        <div className="social-source-list"><div><p className="eyebrow">SOURCES ACTIVES</p><h2>{sources.length} chaîne(s) surveillée(s)</h2></div>{sources.length === 0 ? <p>Aucune source automatique pour le moment.</p> : sources.map(source => <article className={editingSourceId === source.id ? "selected" : ""} key={source.id}><span>{source.platform === "youtube" ? "▶️" : "🟣"}</span><div><strong>{source.label}</strong><small>{source.identifier} · {source.status || "en attente"}</small>{source.lastError && <em>{source.lastError}</em>}</div><div className="social-source-actions"><button type="button" className="edit" onClick={() => selectSource(source.id)}>Modifier</button><button type="button" onClick={() => void manageSource("remove", source.id)}>Retirer</button></div></article>)}</div>
+        <div className="settings community-settings social-publisher"><div><p className="eyebrow">ANNONCE MANUELLE</p><h2>Informer la communauté</h2><p>La publication manuelle reste disponible pour les autres plateformes.</p></div><label>Type<select value={form.socialType || "live"} onChange={e => update("socialType")(e.target.value)}><option value="live">Lancement d’un live</option><option value="video">Nouvelle vidéo</option></select></label><label>Plateforme<select value={form.socialPlatform || "YouTube"} onChange={e => update("socialPlatform")(e.target.value)}><option>YouTube</option><option>Twitch</option><option>TikTok</option><option>Instagram</option><option>Kick</option><option>Autre plateforme</option></select></label><label>Créateur<input value={form.socialCreator || ""} onChange={e => update("socialCreator")(e.target.value)} placeholder="Nom du créateur"/></label><label>Titre<input value={form.socialTitle || ""} onChange={e => update("socialTitle")(e.target.value)} placeholder="Titre du live ou de la vidéo"/></label><label className="wide">Lien HTTPS<input type="url" value={form.socialUrl || ""} onChange={e => update("socialUrl")(e.target.value)} placeholder="https://…"/></label><label>Confirmation<input value={form.socialNotifyConfirmation || ""} onChange={e => update("socialNotifyConfirmation")(e.target.value)} placeholder="NOTIFIER"/></label><button disabled={form.socialNotifyConfirmation !== "NOTIFIER" || !form.socialCreator || !form.socialTitle || !form.socialUrl || !data.config.social} onClick={publish}>Publier la notification</button></div>
+    </section>;
 }
 const supportStatusLabels: Record<SupportRequest["status"], string> = {
     open: "Ouverte",
@@ -599,6 +887,7 @@ const supportCategoryLabels: Record<string, string> = {
     other: "Autre demande",
 };
 const SUPPORT_DEEP_LINK_KEY = "fyxbot-pending-support-category";
+const ACTIVE_VIEW_KEY = "fyxbot-dashboard-active-view";
 const supportDeepLinkCategories = new Set(["technical", "configuration", "billing", "abuse", "privacy", "security", "other"]);
 function initialSupportCategory() {
     if (typeof window === "undefined")
@@ -636,13 +925,94 @@ function SupportDashboard({ workspace, conversation, composing, form, update, se
         <div className="support-faq"><div><p className="eyebrow">AVANT D’ÉCRIRE</p><h2>Réponses rapides</h2></div><article><strong>Une commande n’apparaît pas</strong><p>Vérifiez que FyxBot a été invité avec le droit d’utiliser les commandes, puis relancez la synchronisation globale.</p></article><article><strong>FyxBot refuse une action</strong><p>Placez son rôle au-dessus des rôles qu’il doit gérer et vérifiez ses permissions dans la catégorie concernée.</p></article><article><strong>Demande liée aux données</strong><p>Choisissez “Données personnelles” et indiquez votre identifiant Discord ainsi que le serveur concerné.</p></article></div>
     </section>;
 }
-export default function Dashboard() {
-    const [active, setActive] = useState("Vue d’ensemble"), [data, setData] = useState<State | null>(null), [creatorStats, setCreatorStats] = useState<CreatorStats | null>(null), [supportStaff, setSupportStaff] = useState<SupportStaffMember[]>([]), [memberWarnings, setMemberWarnings] = useState<MemberWarning[] | null>(null), [supportWorkspace, setSupportWorkspace] = useState<SupportWorkspace | null>(null), [supportConversation, setSupportConversation] = useState<SupportConversation | null>(null), [supportComposing, setSupportComposing] = useState(false), [requestedSupportCategory, setRequestedSupportCategory] = useState(initialSupportCategory), [account, setAccount] = useState<Account | null>(null), [accountMenuOpen, setAccountMenuOpen] = useState(false), [mobileNavOpen, setMobileNavOpen] = useState(false), [selectedGuild, setSelectedGuild] = useState(""), [form, setForm] = useState<Record<string, string>>({}), [notice, setNotice] = useState("Connexion à FyxBot…"), [authenticated, setAuthenticated] = useState<boolean | null>(null), [csrfToken, setCsrfToken] = useState("");
+type DashboardProps = {
+    variant?: "v1" | "v2";
+};
+
+export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
+    const isV2 = variant === "v2";
+    const [active, setActiveState] = useState("Vue d’ensemble"), [data, setData] = useState<State | null>(null), [creatorStats, setCreatorStats] = useState<CreatorStats | null>(null), [supportStaff, setSupportStaff] = useState<SupportStaffMember[]>([]), [memberWarnings, setMemberWarnings] = useState<MemberWarning[] | null>(null), [supportWorkspace, setSupportWorkspace] = useState<SupportWorkspace | null>(null), [supportConversation, setSupportConversation] = useState<SupportConversation | null>(null), [supportComposing, setSupportComposing] = useState(false), [requestedSupportCategory, setRequestedSupportCategory] = useState(initialSupportCategory), [account, setAccount] = useState<Account | null>(null), [accountMenuOpen, setAccountMenuOpen] = useState(false), [mobileNavOpen, setMobileNavOpen] = useState(false), [selectedGuild, setSelectedGuild] = useState(""), [form, setForm] = useState<Record<string, string>>({}), [notice, setNotice] = useState("Connexion à FyxBot…"), [authenticated, setAuthenticated] = useState<boolean | null>(null), [csrfToken, setCsrfToken] = useState("");
+    const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>("simple");
+    const [favorites, setFavorites] = useState<string[]>([]);
+    const [preferencesReady, setPreferencesReady] = useState(false);
+    const [searchOpen, setSearchOpen] = useState(false);
+    const [searchQuery, setSearchQuery] = useState("");
+    const [alertsOpen, setAlertsOpen] = useState(false);
+    const refreshController = useRef<AbortController | null>(null);
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
+    const setActive = useCallback((view: string) => {
+        const normalizedView = normalizeDashboardView(view);
+        try { window.sessionStorage.setItem(ACTIVE_VIEW_KEY, normalizedView); }
+        catch { /* La navigation reste utilisable si le stockage est indisponible. */ }
+        setActiveState(normalizedView);
+    }, []);
+    useEffect(() => {
+        let storedMode: InterfaceMode = "simple";
+        let storedFavorites: string[] = [];
+        try {
+            storedMode = window.localStorage.getItem(FYXBOT_INTERFACE_MODE_KEY) === "advanced" ? "advanced" : "simple";
+            const parsed = JSON.parse(window.localStorage.getItem(FYXBOT_FAVORITES_KEY) || "[]");
+            storedFavorites = Array.isArray(parsed) ? parsed.filter(item => typeof item === "string") : [];
+        }
+        catch { /* Les préférences restent facultatives. */ }
+        const timer = window.setTimeout(() => {
+            setInterfaceMode(storedMode);
+            setFavorites(storedFavorites);
+            setPreferencesReady(true);
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, []);
+    useEffect(() => {
+        if (!preferencesReady)
+            return;
+        try {
+            window.localStorage.setItem(FYXBOT_INTERFACE_MODE_KEY, interfaceMode);
+            window.localStorage.setItem(FYXBOT_FAVORITES_KEY, JSON.stringify(favorites));
+        }
+        catch { /* Le panel reste utilisable sans stockage local. */ }
+    }, [favorites, interfaceMode, preferencesReady]);
+    useEffect(() => {
+        const handleShortcut = (event: KeyboardEvent) => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+                event.preventDefault();
+                setAlertsOpen(false);
+                setSearchOpen(open => !open);
+            }
+            if (event.key === "Escape") {
+                setSearchOpen(false);
+                setAlertsOpen(false);
+            }
+        };
+        window.addEventListener("keydown", handleShortcut);
+        return () => window.removeEventListener("keydown", handleShortcut);
+    }, []);
+    useEffect(() => {
+        if (!searchOpen)
+            return;
+        const timer = window.setTimeout(() => searchInputRef.current?.focus(), 0);
+        return () => window.clearTimeout(timer);
+    }, [searchOpen]);
     useEffect(() => {
         if (!supportDeepLinkCategories.has(requestedSupportCategory))
             return;
         try { window.sessionStorage.setItem(SUPPORT_DEEP_LINK_KEY, requestedSupportCategory); } catch { /* Navigation directe toujours disponible. */ }
     }, [requestedSupportCategory]);
+    useEffect(() => {
+        document.body.dataset.dashboardVersion = variant;
+        return () => {
+            delete document.body.dataset.dashboardVersion;
+        };
+    }, [variant]);
+    useEffect(() => {
+        let savedView = "";
+        try { savedView = window.sessionStorage.getItem(ACTIVE_VIEW_KEY) || ""; }
+        catch { /* La navigation reste utilisable si le stockage est indisponible. */ }
+        const normalizedView = normalizeDashboardView(savedView);
+        if (normalizedView === "Créateur" || !Object.hasOwn(icons, normalizedView))
+            return;
+        const timer = window.setTimeout(() => setActive(normalizedView), 0);
+        return () => window.clearTimeout(timer);
+    }, [setActive]);
     useEffect(() => {
         if (!mobileNavOpen)
             return;
@@ -659,9 +1029,14 @@ export default function Dashboard() {
         };
     }, [mobileNavOpen]);
     const refresh = useCallback(async (guildId = "", hydrateForm = true) => {
+        refreshController.current?.abort();
+        const controller = new AbortController();
+        refreshController.current = controller;
         try {
             const query = guildId ? `?guildId=${encodeURIComponent(guildId)}` : "";
-            const r = await fetch(`${API}/state${query}`, { credentials: "include" }), n = await r.json();
+            const r = await fetch(`${API}/state${query}`, { credentials: "include", signal: controller.signal }), n = await r.json();
+            if (refreshController.current !== controller)
+                return;
             if (r.status === 401) {
                 setAuthenticated(false);
                 setCsrfToken("");
@@ -696,11 +1071,14 @@ export default function Dashboard() {
                     birthdayRoleId: n.config.birthdays?.roleId || "",
                     birthdayTimezone: n.config.birthdays?.timezone || "Europe/Paris",
                     birthdayMessage: n.config.birthdays?.message || DEFAULT_BIRTHDAY_MESSAGE,
+                    botNickname: n.guild.botNickname || "",
+                    botNicknameConfirmation: "",
                     setupMode: n.setupAnalysis?.recommendation === "complete" ? "complete" : "synchronize",
                     setupConfirmation: "",
                     setupDescription: n.setupBlueprint?.description || "",
                     socialChannelId: n.config.social?.channelId || "",
                     socialRoleId: n.config.social?.roleId || "",
+                    socialSourceId: "",
                     socialSourcePlatform: "youtube",
                     socialSourceIdentifier: "",
                     socialSourceLabel: "",
@@ -722,19 +1100,18 @@ export default function Dashboard() {
                     voiceCategoryId: n.config.temporaryVoice?.categoryId || "",
                     voiceHubName: n.config.temporaryVoice?.hubName || "➕ Créer un salon",
                     voiceDefaultLimit: String(n.config.temporaryVoice?.defaultLimit || 0),
-                    messageMode: "changelog",
+                    messageMode: "message",
+                    messagePublicationId: "",
                     messageChannelId: "",
-                    messageVersion: CURRENT_RELEASE.version,
-                    messageEnvironment: "production",
                     messageContent: "",
                     messageTitle: "",
                     messageDescription: "",
                     messageColor: "#ef4444",
-                    messageLinkUrl: "https://fyxbot-panel-production.up.railway.app/changelog",
-                    messageButtonLabel: "Consulter le changelog",
+                    messageLinkUrl: "",
+                    messageButtonLabel: "",
                     messageImageUrl: "",
                     messageThumbnailUrl: "",
-                    messageFooter: "FyxBot • Changelog",
+                    messageFooter: "FyxBot",
                     supportCategory: "technical",
                     supportPriority: "normal",
                     supportSubject: "",
@@ -745,10 +1122,19 @@ export default function Dashboard() {
                     supportStaffConfirmation: "",
                 });
         }
-        catch {
-            setNotice("Le bot FyxBot ou sa passerelle locale est indisponible.");
+        catch (error) {
+            if (controller.signal.aborted || refreshController.current !== controller)
+                return;
+            setNotice(error instanceof Error && error.message
+                ? error.message
+                : "Le bot FyxBot ou sa passerelle locale est indisponible.");
+        }
+        finally {
+            if (refreshController.current === controller)
+                refreshController.current = null;
         }
     }, []);
+    useEffect(() => () => refreshController.current?.abort(), []);
     useEffect(() => {
         const timer = window.setTimeout(async () => {
             try {
@@ -791,7 +1177,7 @@ export default function Dashboard() {
             setRequestedSupportCategory("");
         }, 0);
         return () => window.clearTimeout(timer);
-    }, [authenticated, selectedGuild, requestedSupportCategory]);
+    }, [authenticated, selectedGuild, requestedSupportCategory, setActive]);
     const update = (k: string) => (v: string) => setForm(f => ({ ...f, [k]: v }));
     const loadSupport = useCallback(async () => {
         try {
@@ -934,11 +1320,77 @@ export default function Dashboard() {
             if (!r.ok)
                 throw Error(n.error);
             setForm(f => ({ ...f, setupConfirmation: "" }));
-            setNotice(`✓ ${n.message}`);
+            if (mode === "design") {
+                setData(current => current ? { ...current, setupBlueprint: n.blueprint, setupAnalysis: n.analysis, setupSimulation: n.simulation } : current);
+                setNotice(`✓ ${n.message}`);
+                return;
+            }
             await refresh(selectedGuild);
+            setNotice(`✓ ${n.message}`);
         }
         catch (e) {
             setNotice(e instanceof Error ? e.message : "Échec de la configuration.");
+        }
+    }
+    async function saveBotNickname(nickname: string, confirmation: string) {
+        setNotice(nickname ? "Personnalisation du nom de FyxBot…" : "Réinitialisation du nom de FyxBot…");
+        try {
+            const response = await fetch(`${API}/bot/nickname`, {
+                method: "POST",
+                credentials: "include",
+                headers: mutationHeaders(csrfToken),
+                body: JSON.stringify({ guildId: selectedGuild, nickname, confirmation }),
+            });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            setForm(current => ({ ...current, botNickname: payload.nickname || "", botNicknameConfirmation: "" }));
+            await refresh(selectedGuild, false);
+            setNotice(`✓ ${payload.message}`);
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Impossible de modifier le nom affiché de FyxBot.");
+        }
+    }
+    async function deleteSetupPreview() {
+        if (!window.confirm("Supprimer cet aperçu de configuration ?\n\nAucun rôle, catégorie ou salon Discord ne sera supprimé."))
+            return;
+        setNotice("Suppression de l’aperçu…");
+        try {
+            const response = await fetch(`${API}/setup/preview/delete`, {
+                method: "POST",
+                credentials: "include",
+                headers: mutationHeaders(csrfToken),
+                body: JSON.stringify({ guildId: selectedGuild, confirmation: "SUPPRIMER" }),
+            });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            setForm(current => ({ ...current, setupDescription: "", setupConfirmation: "" }));
+            await refresh(selectedGuild);
+            setNotice(`✓ ${payload.message}`);
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Suppression de l’aperçu impossible.");
+        }
+    }
+    async function rollbackChange(changeId: string, confirmation: string) {
+        setNotice("Restauration sécurisée du serveur en cours…");
+        try {
+            const response = await fetch(`${API}/history/rollback`, {
+                method: "POST",
+                credentials: "include",
+                headers: mutationHeaders(csrfToken),
+                body: JSON.stringify({ guildId: selectedGuild, changeId, confirmation }),
+            });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            await refresh(selectedGuild);
+            setNotice(`✓ ${payload.message}`);
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Retour arrière impossible.");
         }
     }
     async function moderate() {
@@ -1011,6 +1463,88 @@ export default function Dashboard() {
             return;
         setForm(f => ({ ...f, rolePanelId: panel.id, rolePanelTitle: panel.title, rolePanelDescription: panel.description, rolePanelChannelId: panel.channelId, rolePanelRole1: panel.roleIds[0] || "", rolePanelRole2: panel.roleIds[1] || "", rolePanelRole3: panel.roleIds[2] || "", rolePanelRole4: panel.roleIds[3] || "", rolePanelRole5: panel.roleIds[4] || "", rolePanelEditConfirmation: "" }));
     }
+    function selectSocialSource(sourceId: string) {
+        const source = data?.config.social?.sources?.find(item => item.id === sourceId);
+        if (!source)
+            return;
+        setForm(current => ({ ...current, socialSourceId: source.id, socialSourcePlatform: source.platform, socialSourceIdentifier: source.identifier, socialSourceLabel: source.label }));
+    }
+    function resetSocialSourceEditor() {
+        setForm(current => ({ ...current, socialSourceId: "", socialSourcePlatform: "youtube", socialSourceIdentifier: "", socialSourceLabel: "" }));
+    }
+    function openContentLibraryItem(item: ContentLibraryItem) {
+        if (item.kind === "message" && item.publicationId) {
+            selectPublishedMessage(item.publicationId);
+            setActive("Messages");
+            return;
+        }
+        if (item.kind === "ticket" && item.entityId) {
+            selectTicketPanel(item.entityId);
+            setActive("Tickets");
+            return;
+        }
+        if (item.kind === "role" && item.entityId) {
+            selectRolePanel(item.entityId);
+            setActive("Rôles");
+            return;
+        }
+        if (item.kind === "social" && item.entityId) {
+            selectSocialSource(item.entityId);
+            setActive("Social");
+            return;
+        }
+        setActive(item.target);
+    }
+    async function removeContentLibraryItem(item: ContentLibraryItem, confirmation: string) {
+        setNotice(`Retrait de ${item.title}…`);
+        try {
+            const response = await fetch(`${API}/content/delete`, {
+                method: "POST",
+                credentials: "include",
+                headers: mutationHeaders(csrfToken),
+                body: JSON.stringify({ guildId: selectedGuild, itemId: item.id, confirmation }),
+            });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            if (item.kind === "message" && item.publicationId === form.messagePublicationId)
+                resetMessageComposer();
+            if (item.kind === "ticket" && item.entityId === form.ticketPanelId)
+                setForm(current => ({ ...current, ticketPanelId: "", ticketTitle: "", ticketRequestType: "", ticketEditConfirmation: "" }));
+            if (item.kind === "role" && item.entityId === form.rolePanelId)
+                setForm(current => ({ ...current, rolePanelId: "", rolePanelTitle: "", rolePanelDescription: "", rolePanelEditConfirmation: "" }));
+            if (item.kind === "social" && item.entityId === form.socialSourceId)
+                resetSocialSourceEditor();
+            await refresh(selectedGuild, false);
+            setNotice(`✓ ${payload.message}`);
+            return true;
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Impossible de retirer ce contenu.");
+            return false;
+        }
+    }
+    async function restoreContentLibraryItem(item: ContentTrashItem, confirmation: string) {
+        setNotice(`Restauration de ${item.title}…`);
+        try {
+            const response = await fetch(`${API}/content/restore`, {
+                method: "POST",
+                credentials: "include",
+                headers: mutationHeaders(csrfToken),
+                body: JSON.stringify({ guildId: selectedGuild, trashId: item.id, confirmation }),
+            });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            await refresh(selectedGuild, false);
+            setNotice(`✓ ${payload.message}`);
+            return true;
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Impossible de restaurer ce contenu.");
+            return false;
+        }
+    }
     async function publishRolePanel() {
         setNotice("Publication du panneau de rôles…");
         try {
@@ -1067,14 +1601,14 @@ export default function Dashboard() {
             setNotice(e instanceof Error ? e.message : "Échec de la notification.");
         }
     }
-    async function manageSocialSource(action: "add" | "remove", sourceId = "") {
-        setNotice(action === "add" ? "Ajout de la surveillance automatique…" : "Suppression de la surveillance…");
+    async function manageSocialSource(action: "add" | "update" | "remove", sourceId = "") {
+        setNotice(action === "add" ? "Ajout de la surveillance automatique…" : action === "update" ? "Modification de la surveillance…" : "Suppression de la surveillance…");
         try {
             const r = await fetch(`${API}/social/sources`, { method: "POST", credentials: "include", headers: mutationHeaders(csrfToken), body: JSON.stringify({ guildId: selectedGuild, action, sourceId, platform: form.socialSourcePlatform || "youtube", identifier: form.socialSourceIdentifier, label: form.socialSourceLabel }) }), n = await r.json();
             if (!r.ok)
                 throw Error(n.error);
             setNotice(`✓ ${n.message}`);
-            setForm(f => ({ ...f, socialSourceIdentifier: "", socialSourceLabel: "" }));
+            resetSocialSourceEditor();
             await refresh(selectedGuild, false);
         }
         catch (e) {
@@ -1110,17 +1644,62 @@ export default function Dashboard() {
         }
     }
     async function sendCustomMessage() {
-        setNotice("Publication du message dans Discord…");
+        const editing = Boolean(form.messagePublicationId);
+        setNotice(editing ? "Modification du message Discord…" : "Publication du message dans Discord…");
         try {
-            const r = await fetch(`${API}/messages/send`, { method: "POST", credentials: "include", headers: mutationHeaders(csrfToken), body: JSON.stringify({ guildId: selectedGuild, mode: form.messageMode || "changelog", channelId: form.messageChannelId, content: form.messageContent, title: form.messageTitle, description: form.messageDescription, color: form.messageColor, imageUrl: form.messageImageUrl, thumbnailUrl: form.messageThumbnailUrl, linkUrl: form.messageLinkUrl, buttonLabel: form.messageButtonLabel, footer: form.messageFooter, version: form.messageVersion, environment: form.messageEnvironment, confirmation: form.messageConfirmation }) }), n = await r.json();
+            const r = await fetch(`${API}/messages/send`, { method: "POST", credentials: "include", headers: mutationHeaders(csrfToken), body: JSON.stringify({ guildId: selectedGuild, mode: "message", publicationId: form.messagePublicationId || null, channelId: form.messageChannelId, content: form.messageContent, title: form.messageTitle, description: form.messageDescription, color: form.messageColor, imageUrl: form.messageImageUrl, thumbnailUrl: form.messageThumbnailUrl, linkUrl: form.messageLinkUrl, buttonLabel: form.messageButtonLabel, footer: form.messageFooter, confirmation: form.messageConfirmation }) }), n = await r.json();
             if (!r.ok)
                 throw Error(n.error);
             setNotice(`✓ ${n.message}`);
             setForm(f => ({ ...f, messageConfirmation: "" }));
+            await refresh(selectedGuild, false);
         }
         catch (e) {
-            setNotice(e instanceof Error ? e.message : "Échec de la publication.");
+            setNotice(e instanceof Error ? e.message : editing ? "Échec de la modification." : "Échec de la publication.");
         }
+    }
+    function selectPublishedMessage(id: string) {
+        if (!id) {
+            resetMessageComposer();
+            return;
+        }
+        const publication = data?.publishedMessages?.find(message => message.id === id);
+        if (!publication)
+            return;
+        setForm(current => ({
+            ...current,
+            messageMode: "message",
+            messagePublicationId: publication.id,
+            messageChannelId: publication.channelId,
+            messageContent: publication.content,
+            messageTitle: publication.title,
+            messageDescription: publication.description,
+            messageColor: publication.color || "#ef4444",
+            messageLinkUrl: publication.linkUrl,
+            messageButtonLabel: publication.buttonLabel,
+            messageImageUrl: publication.imageUrl,
+            messageThumbnailUrl: publication.thumbnailUrl,
+            messageFooter: publication.footer,
+            messageConfirmation: "",
+        }));
+    }
+    function resetMessageComposer() {
+        setForm(current => ({
+            ...current,
+            messageMode: "message",
+            messagePublicationId: "",
+            messageChannelId: "",
+            messageContent: "",
+            messageTitle: "",
+            messageDescription: "",
+            messageColor: "#ef4444",
+            messageLinkUrl: "",
+            messageButtonLabel: "",
+            messageImageUrl: "",
+            messageThumbnailUrl: "",
+            messageFooter: "FyxBot",
+            messageConfirmation: "",
+        }));
     }
     async function setupTemporaryVoice() {
         setNotice("Configuration des salons vocaux…");
@@ -1219,6 +1798,7 @@ export default function Dashboard() {
     }
     async function logout() {
         setNotice("Déconnexion…");
+        refreshController.current?.abort();
         try {
             const r = await fetch(`${API}/auth/logout`, { method: "POST", credentials: "include", headers: mutationHeaders(csrfToken, false) });
             if (!r.ok)
@@ -1244,7 +1824,52 @@ export default function Dashboard() {
     }
     const securityScore = data ? Math.round((data.metrics.securityRules / 4) * 100) : null;
     const configuredModules = data ? [data.config.logs, data.config.tickets, data.config.suggestions, data.config.welcome, data.config.rules, data.config.birthdays, data.config.social, data.config.temporaryVoice].filter(Boolean).length : 0;
-    const modules = [{ icon: "⚙️", name: "Configuration", detail: "Préparer ce serveur", tone: "orange" }, { icon: "✉️", name: "Messages", detail: "Texte, embeds et images", tone: "orange" }, { icon: "🎫", name: "Tickets", detail: `${data?.metrics.openTickets ?? 0} ticket(s) ouvert(s)`, tone: "violet" }, { icon: "📜", name: "Règlement", detail: data?.config.rules ? "Publié et modifiable" : "À configurer", tone: "orange" }, { icon: "🎂", name: "Anniversaires", detail: `${Object.keys(data?.config.birthdays?.birthdays || {}).length} date(s) enregistrée(s)`, tone: "violet" }, { icon: "📣", name: "Social", detail: data?.config.social ? "Notifications prêtes" : "À configurer", tone: "orange" }, { icon: "🔊", name: "Vocaux", detail: `${Object.keys(data?.config.temporaryVoice?.rooms || {}).length} salon(s) temporaire(s)`, tone: "blue" }, { icon: "🛡️", name: "Sécurité", detail: `${data?.metrics.securityRules ?? 0} protections actives`, tone: "green" }, { icon: "👋", name: "Accueil", detail: "Bienvenue et rôles", tone: "blue" }, { icon: "🧾", name: "Logs", detail: "Journal centralisé", tone: "orange" }];
+    const modules = [{ icon: "🧭", name: "Pilotage", detail: "Parcours, structure et historique", tone: "orange" }, { icon: "✉️", name: "Messages", detail: "Texte, embeds et images", tone: "orange" }, { icon: "🎫", name: "Tickets", detail: `${data?.metrics.openTickets ?? 0} ticket(s) ouvert(s)`, tone: "violet" }, { icon: "📜", name: "Règlement", detail: data?.config.rules ? "Publié et modifiable" : "À configurer", tone: "orange" }, { icon: "🎂", name: "Anniversaires", detail: `${Object.keys(data?.config.birthdays?.birthdays || {}).length} date(s) enregistrée(s)`, tone: "violet" }, { icon: "📣", name: "Social", detail: data?.config.social ? "Notifications prêtes" : "À configurer", tone: "orange" }, { icon: "🔊", name: "Vocaux", detail: `${Object.keys(data?.config.temporaryVoice?.rooms || {}).length} salon(s) temporaire(s)`, tone: "blue" }, { icon: "🛡️", name: "Sécurité", detail: `${data?.metrics.securityRules ?? 0} protections actives`, tone: "green" }, { icon: "👋", name: "Accueil", detail: "Bienvenue et rôles", tone: "blue" }, { icon: "🧾", name: "Logs", detail: "Journal centralisé", tone: "orange" }];
+    const authorizedNavigationGroups = navigationGroups.map(group => ({
+        ...group,
+        items: group.items.filter(item => item !== "Créateur" || data?.creatorAccess),
+    })).filter(group => group.items.length > 0);
+    const visibleNavigationGroups = authorizedNavigationGroups.map(group => ({
+        ...group,
+        items: group.items.filter(item => interfaceMode === "advanced" || SIMPLE_NAVIGATION_ITEMS.has(item)),
+    })).filter(group => group.items.length > 0);
+    const searchablePanelItems = [
+        ...authorizedNavigationGroups.flatMap(group => group.items.map(name => ({ name, group: group.label }))),
+        { name: "FyxStream", group: "Streaming" },
+    ];
+    const normalizedSearch = searchQuery.trim().toLocaleLowerCase("fr-FR");
+    const searchResults = searchablePanelItems.filter(item => !normalizedSearch
+        || `${item.name} ${item.group}`.toLocaleLowerCase("fr-FR").includes(normalizedSearch));
+    const availablePanelNames = new Set(searchablePanelItems.map(item => item.name));
+    const visibleFavorites = favorites.filter(item => availablePanelNames.has(item));
+    const visibleModules = interfaceMode === "simple"
+        ? modules.filter(module => SIMPLE_NAVIGATION_ITEMS.has(module.name))
+        : modules;
+    const panelAlerts: PanelAlert[] = [];
+    if (data && !data.bot.online)
+        panelAlerts.push({ id: "bot-offline", icon: "🔴", title: "Bot déconnecté", detail: "FyxBot ne répond plus sur Discord.", target: "Assistance FyxBot", tone: "critical" });
+    if (data && data.setupAnalysis.totals.permissionIssues > 0)
+        panelAlerts.push({ id: "permissions", icon: "🔐", title: "Permissions à corriger", detail: `${data.setupAnalysis.totals.permissionIssues} anomalie(s) détectée(s).`, target: "Pilotage", tone: "warning" });
+    if (data && data.metrics.securityRules < 4)
+        panelAlerts.push({ id: "security", icon: "🛡️", title: "Protection incomplète", detail: `${data.metrics.securityRules}/4 règles de sécurité sont actives.`, target: "Sécurité", tone: "warning" });
+    if (data && data.metrics.openTickets > 0)
+        panelAlerts.push({ id: "tickets", icon: "🎫", title: "Tickets en attente", detail: `${data.metrics.openTickets} demande(s) restent ouvertes.`, target: "Tickets", tone: "info" });
+    const socialErrors = data?.config.social?.sources?.filter(source => source.lastError) || [];
+    if (socialErrors.length > 0)
+        panelAlerts.push({ id: "social", icon: "📣", title: "Source sociale à vérifier", detail: `${socialErrors.length} source(s) signalent une erreur.`, target: "Social", tone: "warning" });
+    if (data && !data.onboarding.complete)
+        panelAlerts.push({ id: "onboarding", icon: "🧭", title: "Configuration à terminer", detail: `${data.onboarding.percent}% du parcours est terminé.`, target: "Pilotage", tone: "info" });
+    function openPanel(target: string) {
+        setActive(target);
+        setSearchOpen(false);
+        setAlertsOpen(false);
+        setMobileNavOpen(false);
+    }
+    function toggleFavorite(target: string) {
+        setFavorites(current => current.includes(target)
+            ? current.filter(item => item !== target)
+            : [...current, target]);
+    }
     const busy = notice.endsWith("…") && notice !== "Connexion à FyxBot…";
     useEffect(() => {
         document.body.dataset.dashboardView = active === "Vue d’ensemble" ? "overview" : "module";
@@ -1277,30 +1902,32 @@ export default function Dashboard() {
             return <CreatorDashboard stats={creatorStats as CreatorStats & UsageStats} supportStaff={supportStaff} form={form} update={update} grantSupportRole={() => void grantSupportRole()} removeSupportRole={userId => void removeSupportRole(userId)}/>;
         if (active === "Créateur")
             return <section className="creator-workspace">{!creatorStats ? <div className="creator-empty"><p className="eyebrow">ESPACE PRIVÉ</p><h2>Observatoire FyxBot</h2><p>Consulte les installations et l’adoption de l’offre Fondateur Premium.</p><button onClick={loadCreatorStats}>Charger les statistiques</button></div> : <><div className="creator-metrics"><article><span>SERVEURS ACTIFS</span><strong>{creatorStats.guildCount}</strong><small>FyxBot installé actuellement</small></article><article><span>MEMBRES COUVERTS</span><strong>{creatorStats.memberCount.toLocaleString("fr-FR")}</strong><small>Total des communautés</small></article><article><span>INSTALLATIONS</span><strong>{creatorStats.allTime}</strong><small>Depuis le début du suivi</small></article><article><span>DÉSINSTALLATIONS</span><strong>{creatorStats.removed}</strong><small>Depuis le début du suivi</small></article></div><div className="creator-grid"><div className="creator-servers"><p className="eyebrow">SERVEURS ACTIFS</p><h2>Utilisation de FyxBot</h2>{creatorStats.installations.map(guild => <article key={guild.guildId}><div><strong>{guild.guildName}</strong><small>Suivi depuis le {new Date(guild.firstSeenAt).toLocaleDateString("fr-FR")}</small></div><b>{guild.memberCount.toLocaleString("fr-FR")} membres</b></article>)}</div><div className="premium-plan"><p className="eyebrow">OFFRE FONDATEUR</p><h2>Free + FyxBot Premium</h2><div><strong>Free</strong><p>Outils essentiels avec un panneau de tickets, un panneau de rôles et une source sociale.</p></div><div className="premium"><strong>Premium utilisateur</strong><p>Capacités renforcées sur tous les serveurs administrés par le bénéficiaire pendant son accès.</p></div><small>30 jours offerts aux 100 premiers utilisateurs · sans carte ni renouvellement automatique.</small></div></div></>}</section>;
+        if (isV2 && active === "Vue d’ensemble")
+            return <section className="v2-dashboard" aria-label="Centre de pilotage FyxBot V2"><div className="v2-command-bar"><div><p className="eyebrow">PILOTAGE RAPIDE</p><h2>Que voulez-vous faire aujourd’hui ?</h2><p>Les raccourcis ouvrent directement les réglages du serveur sélectionné.</p></div><div><button type="button" onClick={() => setActive("Démarrage")}><span aria-hidden="true">🧭</span>Démarrage</button><button type="button" onClick={() => setActive("Sécurité")}><span aria-hidden="true">🛡️</span>Sécurité</button><button type="button" onClick={() => setActive("Tickets")}><span aria-hidden="true">🎫</span>Tickets</button><button type="button" onClick={() => setActive("Assistance FyxBot")}><span aria-hidden="true">🛟</span>Support</button></div></div><div className="v2-dashboard-grid"><article className="v2-progress-card"><div><p className="eyebrow">MISE EN ROUTE</p><strong>{data.onboarding.percent}%</strong></div><h3>{data.onboarding.complete ? "Configuration terminée" : "Votre serveur prend forme"}</h3><p>{data.onboarding.completedCount}/{data.onboarding.totalCount} étapes terminées sur {data.guild.name}.</p><div className="v2-progress-track" role="progressbar" aria-label="Progression de la configuration" aria-valuemin={0} aria-valuemax={100} aria-valuenow={data.onboarding.percent}><i style={{ width: `${data.onboarding.percent}%` }}/></div><button type="button" onClick={() => setActive("Démarrage")}>{data.onboarding.complete ? "Vérifier la configuration" : "Continuer la configuration"} →</button></article><article className="v2-activity-card"><div><p className="eyebrow">ACTIVITÉ RÉCENTE</p><button type="button" onClick={() => setActive("Logs")}>Tout voir</button></div>{data.recentLogs.length === 0 ? <p className="v2-empty-state">Aucune activité récente enregistrée pour ce serveur.</p> : <div className="v2-activity-list">{data.recentLogs.slice(0, 3).map(log => <article key={log.id}><span aria-hidden="true">●</span><div><strong>{log.title}</strong><small>{log.description.replaceAll(/[*<>]/g, "")}</small></div><time>{new Date(log.createdAt).toLocaleDateString("fr-FR", { day: "2-digit", month: "short" })}</time></article>)}</div>}</article></div><div className="v2-module-heading"><div><p className="eyebrow">OUTILS DU SERVEUR</p><h2>Vos modules FyxBot</h2></div><span>{configuredModules}/8 configurés</span></div><div className="v2-module-board">{visibleModules.map(module => <button type="button" key={module.name} className={module.tone} onClick={() => setActive(module.name)}><span aria-hidden="true">{module.icon}</span><div><strong>{module.name}</strong><small>{module.detail}</small></div><b aria-hidden="true">→</b></button>)}</div></section>;
         if (active === "Vue d’ensemble")
             return <section className="overview-panel" aria-label="État des services FyxBot"><div className="overview-head"><div><p className="eyebrow">CENTRE DE PILOTAGE</p><h2>Votre serveur en un coup d’œil</h2><p>{configuredModules}/8 modules principaux sont configurés sur {data.guild.name}.</p></div><button onClick={() => setActive("Configuration")}>Configurer le serveur</button></div><div className="health-grid"><article><span className="health-icon online">✓</span><div><strong>Bot Discord</strong><small>{data.bot.online ? "Connecté et opérationnel" : "Connexion indisponible"}</small></div></article><article><span className={`health-icon ${data.metrics.securityRules === 4 ? "online" : "warning"}`}>{data.metrics.securityRules === 4 ? "✓" : "!"}</span><div><strong>Protection AutoMod</strong><small>{data.metrics.securityRules}/4 règles actives</small></div></article><article><span className={`health-icon ${data.metrics.openTickets === 0 ? "online" : "warning"}`}>{data.metrics.openTickets}</span><div><strong>Support</strong><small>{data.metrics.openTickets === 0 ? "Aucune demande en attente" : "Ticket(s) à traiter"}</small></div></article></div><div className="quick-actions"><button onClick={() => setActive("Règlement")}><span>📜</span><strong>Publier le règlement</strong><small>Validation des membres</small></button><button onClick={() => setActive("Vocaux")}><span>🔊</span><strong>Gérer les vocaux</strong><small>Salons temporaires</small></button><button onClick={() => setActive("Social")}><span>📣</span><strong>Notifier la communauté</strong><small>Live ou nouvelle vidéo</small></button></div></section>;
-        if (active === "Démarrage")
-            return <OnboardingDashboard data={data} navigate={setActive}/>;
+        if (active === "Pilotage")
+            return <PilotageDashboard data={data} form={form} update={update} runSetup={runSetup} deletePreview={deleteSetupPreview} saveNickname={saveBotNickname} rollback={rollbackChange} navigate={setActive}/>;
         if (active === "Premium")
             return <PremiumDashboard premium={data.premium} guildName={data.guild.name} activate={activateFounderAccess} busy={busy}/>;
         if (active === "Communauté")
             return <CommunityDashboard data={data} form={form} update={update} createEvent={createCommunityEvent} createGiveaway={createCommunityGiveaway} navigate={setActive}/>;
-        if (active === "Configuration")
-            return <SetupDashboard data={data} form={form} update={update} runSetup={runSetup}/>;
         if (active === "Messages")
-            return <MessageComposer data={data} form={form} update={update} send={sendCustomMessage}/>;
+            return <MessageComposer data={data} form={form} update={update} send={sendCustomMessage} selectPublication={selectPublishedMessage} newPublication={resetMessageComposer} openLibraryItem={openContentLibraryItem} removeLibraryItem={removeContentLibraryItem} restoreLibraryItem={restoreContentLibraryItem}/>;
         if (active === "Règlement")
-            return <section className="community-workspace"><div className="settings community-settings"><div><p className="eyebrow">RÈGLEMENT INTERACTIF</p><h2>{data.config.rules ? "Modifier le règlement" : "Publier le règlement"}</h2><p>Publiez les règles du serveur et attribuez facultativement un rôle lorsque les membres les acceptent.</p></div><label>Titre<input value={form.rulesTitle || ""} onChange={e => update("rulesTitle")(e.target.value)} placeholder="Règlement du serveur"/></label><Select label="Salon de publication" value={form.rulesChannelId || ""} options={data.options.textChannels} onChange={update("rulesChannelId")}/><Select label="Rôle après acceptation" value={form.rulesRoleId || ""} options={[{ id: "", name: "Aucun rôle" }, ...data.options.roles]} onChange={update("rulesRoleId")}/><label className="wide full-row">Articles du règlement<textarea value={form.rulesContent || ""} onChange={e => update("rulesContent")(e.target.value)} maxLength={3900} rows={12} placeholder="1. Respect et bienveillance…"/></label><label>Confirmation<input value={form.rulesConfirmation || ""} onChange={e => update("rulesConfirmation")(e.target.value)} placeholder={data.config.rules ? "MODIFIER" : "PUBLIER"}/></label><button disabled={!form.rulesContent || !form.rulesTitle || (!data.config.rules && !form.rulesChannelId) || form.rulesConfirmation !== (data.config.rules ? "MODIFIER" : "PUBLIER")} onClick={publishRules}>{data.config.rules ? "Mettre à jour" : "Publier le règlement"}</button></div><div className="feature-note"><span>📜</span><div><strong>Commande Discord</strong><p>Les administrateurs disposent aussi de <code>/reglement modele</code>, <code>/reglement publier</code>, <code>/reglement modifier</code> et <code>/reglement statut</code>.</p></div></div></section>;
+            return <section className="community-workspace"><div className="settings community-settings"><div><p className="eyebrow">RÈGLEMENT INTERACTIF</p><h2>{data.config.rules ? "Modifier le règlement" : "Publier le règlement"}</h2><p>Publiez les règles du serveur et attribuez facultativement un rôle lorsque les membres les acceptent.</p></div><label>Titre<input value={form.rulesTitle || ""} onChange={e => update("rulesTitle")(e.target.value)} placeholder="Règlement du serveur"/></label><Select label="Salon de publication" value={form.rulesChannelId || ""} options={data.options.textChannels} onChange={update("rulesChannelId")}/><Select label="Rôle après acceptation" value={form.rulesRoleId || ""} options={[{ id: "", name: "Aucun rôle" }, ...data.options.assignableRoles]} onChange={update("rulesRoleId")}/><label className="wide full-row">Articles du règlement<textarea value={form.rulesContent || ""} onChange={e => update("rulesContent")(e.target.value)} maxLength={3900} rows={12} placeholder="1. Respect et bienveillance…"/></label><label>Confirmation<input value={form.rulesConfirmation || ""} onChange={e => update("rulesConfirmation")(e.target.value)} placeholder={data.config.rules ? "MODIFIER" : "PUBLIER"}/></label><button disabled={!form.rulesContent || !form.rulesTitle || (!data.config.rules && !form.rulesChannelId) || form.rulesConfirmation !== (data.config.rules ? "MODIFIER" : "PUBLIER")} onClick={publishRules}>{data.config.rules ? "Mettre à jour" : "Publier le règlement"}</button></div><div className="feature-note"><span>📜</span><div><strong>Commande Discord</strong><p>Les administrateurs disposent aussi de <code>/reglement modele</code>, <code>/reglement publier</code>, <code>/reglement modifier</code> et <code>/reglement statut</code>.</p></div></div></section>;
         if (active === "Anniversaires")
-            return <section className="community-workspace"><div className="settings community-settings"><div><p className="eyebrow">ANNIVERSAIRES</p><h2>Annonces automatiques</h2><p>{Object.keys(data.config.birthdays?.birthdays || {}).length} membre(s) ont volontairement enregistré une date. L’année de naissance n’est jamais demandée.</p></div><Select label="Salon des annonces" value={form.birthdayChannelId || ""} options={data.options.textChannels} onChange={update("birthdayChannelId")}/><Select label="Rôle temporaire" value={form.birthdayRoleId || ""} options={[{ id: "", name: "Aucun rôle" }, ...data.options.roles]} onChange={update("birthdayRoleId")}/><label>Fuseau horaire<select value={form.birthdayTimezone || "Europe/Paris"} onChange={e => update("birthdayTimezone")(e.target.value)}><option>Europe/Paris</option><option>UTC</option><option>America/Montreal</option><option>Indian/Reunion</option></select></label><label className="wide full-row">Message<input value={form.birthdayMessage || ""} onChange={e => update("birthdayMessage")(e.target.value)} placeholder="Joyeux anniversaire {membres}…"/></label><button disabled={!form.birthdayChannelId} onClick={() => save("birthdays", { channelId: form.birthdayChannelId, roleId: form.birthdayRoleId, timezone: form.birthdayTimezone, message: form.birthdayMessage })}>Enregistrer</button></div><div className="feature-note"><span>🎂</span><div><strong>Inscription volontaire</strong><p>Chaque membre utilise <code>/anniversaire definir</code>. Il peut consulter ou supprimer sa date à tout moment.</p></div></div></section>;
+            return <section className="community-workspace"><div className="settings community-settings"><div><p className="eyebrow">ANNIVERSAIRES</p><h2>Annonces automatiques</h2><p>{Object.keys(data.config.birthdays?.birthdays || {}).length} membre(s) ont volontairement enregistré une date. L’année de naissance n’est jamais demandée.</p></div><Select label="Salon des annonces" value={form.birthdayChannelId || ""} options={data.options.textChannels} onChange={update("birthdayChannelId")}/><Select label="Rôle temporaire" value={form.birthdayRoleId || ""} options={[{ id: "", name: "Aucun rôle" }, ...data.options.assignableRoles]} onChange={update("birthdayRoleId")}/><label>Fuseau horaire<select value={form.birthdayTimezone || "Europe/Paris"} onChange={e => update("birthdayTimezone")(e.target.value)}><option>Europe/Paris</option><option>UTC</option><option>America/Montreal</option><option>Indian/Reunion</option></select></label><label className="wide full-row">Message<input value={form.birthdayMessage || ""} onChange={e => update("birthdayMessage")(e.target.value)} placeholder="Joyeux anniversaire {membres}…"/></label><button disabled={!form.birthdayChannelId} onClick={() => save("birthdays", { channelId: form.birthdayChannelId, roleId: form.birthdayRoleId, timezone: form.birthdayTimezone, message: form.birthdayMessage })}>Enregistrer</button></div><div className="feature-note"><span>🎂</span><div><strong>Inscription volontaire</strong><p>Chaque membre utilise <code>/anniversaire definir</code>. Il peut consulter ou supprimer sa date à tout moment.</p></div></div></section>;
         if (active === "Social")
-            return <SocialDashboard data={data} form={form} update={update} save={() => void save("social", { channelId: form.socialChannelId, roleId: form.socialRoleId })} publish={sendSocialNotification} manageSource={manageSocialSource}/>;
+            return <SocialDashboard data={data} form={form} update={update} save={() => void save("social", { channelId: form.socialChannelId, roleId: form.socialRoleId })} publish={sendSocialNotification} manageSource={manageSocialSource} selectSource={selectSocialSource} cancelSource={resetSocialSourceEditor} navigate={setActive}/>;
+        if (active === "FyxStream")
+            return <StreamingDashboard key={selectedGuild} apiBaseUrl={API} guildId={selectedGuild} csrfToken={csrfToken} navigate={setActive}/>;
         if (active === "Vocaux")
             return <section className="community-workspace"><div className="settings community-settings"><div><p className="eyebrow">SALONS VOCAUX TEMPORAIRES</p><h2>{data.config.temporaryVoice ? "Modifier le générateur" : "Créer le générateur"}</h2><p>Lorsqu’un membre rejoint le générateur, FyxBot crée son salon personnel puis le supprime lorsqu’il est vide.</p></div><Select label="Catégorie" value={form.voiceCategoryId || ""} options={data.options.categories} onChange={update("voiceCategoryId")}/><label>Nom du générateur<input value={form.voiceHubName || ""} onChange={e => update("voiceHubName")(e.target.value)} placeholder="➕ Créer un salon"/></label><label>Limite par défaut<input type="number" min="0" max="99" value={form.voiceDefaultLimit || "0"} onChange={e => update("voiceDefaultLimit")(e.target.value)}/></label><label>Confirmation<input value={form.voiceConfirmation || ""} onChange={e => update("voiceConfirmation")(e.target.value)} placeholder="CONFIGURER"/></label><button disabled={!form.voiceCategoryId || form.voiceConfirmation !== "CONFIGURER"} onClick={setupTemporaryVoice}>Configurer les salons vocaux</button></div><div className="feature-note"><span>🔊</span><div><strong>{Object.keys(data.config.temporaryVoice?.rooms || {}).length} salon(s) actif(s)</strong><p>Les propriétaires peuvent renommer, limiter, verrouiller, autoriser, expulser ou transférer leur salon avec <code>/vocal-temporaire</code>.</p></div></div></section>;
         if (active === "Tickets")
             return <section className="ticket-workspace"><div className="settings ticket-library"><div><p className="eyebrow">MES PANNEAUX</p><h2>Panneaux existants</h2><p>Retrouvez et modifiez les demandes déjà configurées.</p></div><Select label="Panneau à modifier" value={form.ticketPanelId || ""} options={(data.config.tickets?.panels || []).map(panel => ({ id: panel.id, name: panel.title }))} onChange={selectTicketPanel}/><label>Confirmation<input value={form.ticketEditConfirmation || ""} onChange={e => update("ticketEditConfirmation")(e.target.value)} placeholder="MODIFIER"/></label><button disabled={!form.ticketPanelId || form.ticketEditConfirmation !== "MODIFIER"} onClick={updateTicketPanel}>Enregistrer les modifications</button></div><div className="settings ticket-settings"><div><p className="eyebrow">TICKETS MULTI-DEMANDES</p><h2>{form.ticketPanelId ? "Modifier le panneau" : "Nouveau panneau"}</h2><p>Changez les champs après avoir sélectionné un panneau, ou publiez-en un nouveau.</p></div><label>Titre du panneau<input value={form.ticketTitle || ""} onChange={e => update("ticketTitle")(e.target.value)} placeholder="Ex. Recrutement"/></label><label>Type de demande<input value={form.ticketRequestType || ""} onChange={e => update("ticketRequestType")(e.target.value)} placeholder="Ex. candidature"/></label><Select label="Salon du panneau" value={form.ticketPanelChannelId || ""} options={data.options.textChannels} onChange={update("ticketPanelChannelId")}/><Select label="Catégorie des tickets" value={form.categoryId} options={data.options.categories} onChange={update("categoryId")}/><Select label="Rôle responsable" value={form.staffRoleId} options={data.options.roles} onChange={update("staffRoleId")}/><label>Confirmation<input value={form.ticketPublishConfirmation || ""} onChange={e => update("ticketPublishConfirmation")(e.target.value)} placeholder="PUBLIER"/></label><button disabled={form.ticketPublishConfirmation !== "PUBLIER" || !form.ticketPanelChannelId || !form.categoryId || !form.staffRoleId || !form.ticketTitle || !form.ticketRequestType} onClick={publishTicketPanel}>Publier comme nouveau panneau</button></div><div className="feature-note"><span>🔓</span><div><strong>Archives réouvrables</strong><p>À la fermeture, le staff peut conserver le salon comme archive, le réouvrir ou le supprimer. Les nouveaux salons utilisent le format <code>🎫・ticket-nom</code>.</p></div></div></section>;
         if (active === "Accueil")
-            return <div className="settings welcome-settings"><div><p className="eyebrow">ACCUEIL</p><h2>Nouveaux membres</h2><p>Salons, messages et rôle automatique.</p></div><Select label="Bienvenue" value={form.welcomeChannelId} options={data.options.textChannels} onChange={update("welcomeChannelId")}/><Select label="Départs" value={form.leaveChannelId} options={data.options.textChannels} onChange={update("leaveChannelId")}/><Select label="Rôle automatique" value={form.autoRoleId} options={data.options.roles} onChange={update("autoRoleId")}/><label className="wide">Message de bienvenue<input value={form.welcomeMessage} onChange={e => update("welcomeMessage")(e.target.value)} placeholder="Bienvenue {membre}…"/></label><label className="wide">Message de départ<input value={form.leaveMessage} onChange={e => update("leaveMessage")(e.target.value)} placeholder="{membre} a quitté…"/></label><button onClick={() => save("welcome", form)}>Enregistrer</button></div>;
+            return <div className="settings welcome-settings"><div><p className="eyebrow">ACCUEIL</p><h2>Nouveaux membres</h2><p>Salons, messages et rôle automatique.</p></div><Select label="Bienvenue" value={form.welcomeChannelId} options={data.options.textChannels} onChange={update("welcomeChannelId")}/><Select label="Départs" value={form.leaveChannelId} options={data.options.textChannels} onChange={update("leaveChannelId")}/><Select label="Rôle automatique" value={form.autoRoleId} options={data.options.assignableRoles} onChange={update("autoRoleId")}/><label className="wide">Message de bienvenue<input value={form.welcomeMessage} onChange={e => update("welcomeMessage")(e.target.value)} placeholder="Bienvenue {membre}…"/></label><label className="wide">Message de départ<input value={form.leaveMessage} onChange={e => update("leaveMessage")(e.target.value)} placeholder="{membre} a quitté…"/></label><button onClick={() => save("welcome", form)}>Enregistrer</button></div>;
         if (active === "Suggestions")
             return <section className="suggestions-workspace"><div className="settings"><div><p className="eyebrow">SUGGESTIONS</p><h2>Idées de la communauté</h2><p>Choisissez le salon dans lequel les membres voteront.</p></div><Select label="Salon" value={form.suggestionChannelId} options={data.options.textChannels} onChange={update("suggestionChannelId")}/><span /><button onClick={() => save("suggestions", { channelId: form.suggestionChannelId })}>Enregistrer</button></div><div className="suggestions-panel"><div><p className="eyebrow">FILE DE DÉCISION</p><h2>Suggestions récentes</h2><p>Acceptez ou refusez les propositions reçues avec la commande /suggestion. Une décision peut être changée.</p></div><div className="suggestions-list">{data.recentSuggestions.length === 0 ? <p>Aucune nouvelle suggestion enregistrée.</p> : data.recentSuggestions.map(item => <article key={item.id}><div className="suggestion-meta"><span className={`suggestion-status ${item.status}`}>{item.status === "pending" ? "En attente" : item.status === "accepted" ? "Acceptée" : "Refusée"}</span><small>{item.authorName} · {new Date(item.createdAt).toLocaleString("fr-FR")}</small></div><strong>Suggestion {item.id}</strong><p>{item.idea}</p><div className="suggestion-actions"><button disabled={item.status === "accepted"} onClick={() => reviewSuggestion(item.id, "accepted")}>✓ Accepter</button><button disabled={item.status === "rejected"} className="reject" onClick={() => reviewSuggestion(item.id, "rejected")}>× Refuser</button></div></article>)}</div></div></section>;
         if (active === "Sécurité")
@@ -1308,10 +1935,103 @@ export default function Dashboard() {
         if (active === "Modération")
             return <section className="management-panel"><div><p className="eyebrow">BOÎTE À OUTILS</p><h2>Modération FyxBot</h2><p>Choisissez un membre et confirmez explicitement chaque sanction.</p></div><div className="command-grid">{[["🔨", "/ban", "Bannir un membre"], ["👢", "/kick", "Expulser un membre"], ["⏱️", "/timeout", "Exclure temporairement"], ["⚠️", "/warn", "Ajouter un avertissement"], ["📋", "/warnings", "Consulter l’historique"], ["🧹", "/clear", "Nettoyer des messages"]].map(([icon, command, label]) => <article key={command}><span>{icon}</span><div><strong>{command}</strong><small>{label}</small></div></article>)}</div><div className="moderation-form"><Select label="Membre" value={form.moderationMemberId || ""} options={data.options.members} onChange={update("moderationMemberId")}/><label>Action<select value={form.moderationAction || "warn"} onChange={e => update("moderationAction")(e.target.value)}><option value="warn">Avertir</option><option value="timeout">Timeout</option><option value="kick">Expulser</option><option value="ban">Bannir</option></select></label><label>Motif<input value={form.moderationReason || ""} onChange={e => update("moderationReason")(e.target.value)} placeholder="Motif obligatoire"/></label><label>Confirmation<input value={form.moderationConfirmation || ""} onChange={e => update("moderationConfirmation")(e.target.value)} placeholder="CONFIRMER"/></label><button disabled={!form.moderationMemberId || !form.moderationReason || form.moderationConfirmation !== "CONFIRMER"} onClick={moderate}>Appliquer la sanction</button></div></section>;
         if (active === "Rôles")
-            return <section className="role-workspace"><div className="settings role-library"><div><p className="eyebrow">MES PANNEAUX</p><h2>Panneaux de rôles</h2><p>Retrouvez un panneau publié pour modifier ses boutons.</p></div><Select label="Panneau à modifier" value={form.rolePanelId || ""} options={data.config.rolePanels.map(panel => ({ id: panel.id, name: panel.title }))} onChange={selectRolePanel}/><label>Confirmation<input value={form.rolePanelEditConfirmation || ""} onChange={e => update("rolePanelEditConfirmation")(e.target.value)} placeholder="MODIFIER"/></label><button disabled={!form.rolePanelId || form.rolePanelEditConfirmation !== "MODIFIER" || roleIds().length === 0} onClick={updateRolePanel}>Enregistrer les modifications</button></div><div className="settings role-settings"><div><p className="eyebrow">RÔLES INTERACTIFS</p><h2>{form.rolePanelId ? "Modifier le panneau" : "Nouveau panneau"}</h2><p>Les membres pourront ajouter ou retirer eux-mêmes les rôles choisis.</p></div><label>Titre<input value={form.rolePanelTitle || ""} onChange={e => update("rolePanelTitle")(e.target.value)} placeholder="Choisissez vos rôles"/></label><label className="wide">Description<input value={form.rolePanelDescription || ""} onChange={e => update("rolePanelDescription")(e.target.value)} placeholder="Cliquez sur un bouton…"/></label><Select label="Salon de publication" value={form.rolePanelChannelId || ""} options={data.options.textChannels} onChange={update("rolePanelChannelId")}/>{[1, 2, 3, 4, 5].map(index => <Select key={index} label={`Rôle ${index}${index === 1 ? " (obligatoire)" : ""}`} value={form[`rolePanelRole${index}`] || ""} options={[{ id: "", name: "Aucun" }, ...data.options.roles]} onChange={update(`rolePanelRole${index}`)}/>)}<label>Confirmation<input value={form.rolePanelPublishConfirmation || ""} onChange={e => update("rolePanelPublishConfirmation")(e.target.value)} placeholder="PUBLIER"/></label><button disabled={form.rolePanelPublishConfirmation !== "PUBLIER" || !form.rolePanelChannelId || !form.rolePanelTitle || roleIds().length === 0} onClick={publishRolePanel}>Publier comme nouveau panneau</button></div></section>;
+            return <section className="role-workspace"><div className="settings role-library"><div><p className="eyebrow">MES PANNEAUX</p><h2>Panneaux de rôles</h2><p>Retrouvez un panneau publié pour modifier ses boutons.</p></div><Select label="Panneau à modifier" value={form.rolePanelId || ""} options={data.config.rolePanels.map(panel => ({ id: panel.id, name: panel.title }))} onChange={selectRolePanel}/><label>Confirmation<input value={form.rolePanelEditConfirmation || ""} onChange={e => update("rolePanelEditConfirmation")(e.target.value)} placeholder="MODIFIER"/></label><button disabled={!form.rolePanelId || form.rolePanelEditConfirmation !== "MODIFIER" || roleIds().length === 0} onClick={updateRolePanel}>Enregistrer les modifications</button></div><div className="settings role-settings"><div><p className="eyebrow">RÔLES INTERACTIFS</p><h2>{form.rolePanelId ? "Modifier le panneau" : "Nouveau panneau"}</h2><p>Les membres pourront ajouter ou retirer eux-mêmes les rôles choisis.</p></div><label>Titre<input value={form.rolePanelTitle || ""} onChange={e => update("rolePanelTitle")(e.target.value)} placeholder="Choisissez vos rôles"/></label><label className="wide">Description<input value={form.rolePanelDescription || ""} onChange={e => update("rolePanelDescription")(e.target.value)} placeholder="Cliquez sur un bouton…"/></label><Select label="Salon de publication" value={form.rolePanelChannelId || ""} options={data.options.textChannels} onChange={update("rolePanelChannelId")}/>{[1, 2, 3, 4, 5].map(index => <Select key={index} label={`Rôle ${index}${index === 1 ? " (obligatoire)" : ""}`} value={form[`rolePanelRole${index}`] || ""} options={[{ id: "", name: "Aucun" }, ...data.options.assignableRoles]} onChange={update(`rolePanelRole${index}`)}/>)}<label>Confirmation<input value={form.rolePanelPublishConfirmation || ""} onChange={e => update("rolePanelPublishConfirmation")(e.target.value)} placeholder="PUBLIER"/></label><button disabled={form.rolePanelPublishConfirmation !== "PUBLIER" || !form.rolePanelChannelId || !form.rolePanelTitle || roleIds().length === 0} onClick={publishRolePanel}>Publier comme nouveau panneau</button></div></section>;
         return <section className="logs-workspace"><div className="settings"><div><p className="eyebrow">PARAMÈTRES</p><h2>Journal FyxBot</h2><p>Salon central pour les logs et transcripts.</p></div><Select label="Salon des logs" value={form.logChannelId} options={data.options.textChannels} onChange={update("logChannelId")}/><span /><button onClick={() => save("logs", { channelId: form.logChannelId })}>Enregistrer</button></div><div className="logs-panel"><div><p className="eyebrow">HISTORIQUE RÉCENT</p><h2>Activité du serveur</h2></div><div className="logs-list">{data.recentLogs.length === 0 ? <p>Aucune nouvelle activité enregistrée.</p> : data.recentLogs.map(log => <article key={log.id}><span>●</span><div><strong>{log.title}</strong><p>{log.description.replaceAll(/[*<>]/g, "")}</p></div><time>{new Date(log.createdAt).toLocaleString("fr-FR")}</time></article>)}</div></div></section>;
     }
     if (authenticated !== true)
         return <main className="login-screen"><section className="login-card"><div className="brand login-brand"><Image className="brand-logo" src="/brand/fyxbot-logo-symbol.svg" alt="" width={40} height={40}/><div><strong>FYXBOT</strong><small>CONTROL CENTER · v{CURRENT_RELEASE.version}</small></div></div><div className="login-mascot-stage"><Image className="login-mascot" src="/mascotte-fyxbot-640.webp" alt="Mascotte robot FyxBot" width={640} height={640} priority/><span className="login-mascot-shadow" aria-hidden="true"/></div><p className="eyebrow">BOT DISCORD PUBLIC</p><h1>Ajoutez FyxBot à votre serveur Discord</h1><p>Modérez votre communauté, gérez les tickets, renforcez la sécurité et automatisez l’accueil et les rôles avec FyxBot.</p><div className="login-actions"><a className="invite-public" href={INVITE_URL} target="_blank" rel="noreferrer">Inviter FyxBot</a><a className="login-discord" href={`${API}/auth/login`}>Se connecter au panel</a></div></section></main>;
-    return <main className="shell"><aside className="sidebar"><div className="brand"><Image className="brand-logo" src="/brand/fyxbot-logo-symbol.svg" alt="" width={40} height={40}/><div><strong>FYXBOT</strong><small>CONTROL CENTER · v{CURRENT_RELEASE.version}</small></div></div><nav className="desktop-navigation" aria-label="Navigation principale">{navigationGroups.map(group => <div className="nav-group" key={group.label}><p className="nav-group-label">{group.label}</p>{group.items.map(i => <button type="button" title={i} className={active === i ? "active" : ""} key={i} onClick={() => setActive(i)} aria-current={active === i ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{icons[i]}</span><span className="nav-label">{i}</span></button>)}</div>)}</nav><nav className="mobile-navigation" aria-label="Navigation mobile">{mobilePrimaryNavigation.map(i => <button type="button" title={i} className={active === i ? "active" : ""} key={i} onClick={() => { setActive(i); setMobileNavOpen(false); }} aria-current={active === i ? "page" : undefined}><span className="nav-icon" aria-hidden="true">{icons[i]}</span><span className="nav-label">{i === "Vue d’ensemble" ? "Accueil" : i}</span></button>)}<button type="button" title="Plus de modules" className={!mobilePrimarySet.has(active) || mobileNavOpen ? "active" : ""} onClick={() => setMobileNavOpen(open => !open)} aria-expanded={mobileNavOpen} aria-controls="mobile-navigation-sheet"><span className="nav-icon" aria-hidden="true">☰</span><span className="nav-label">Plus</span></button></nav><div className={`sidebar-foot ${accountMenuOpen ? "open" : ""}`}>{accountMenuOpen && <div className="account-popover" role="dialog" aria-label="Compte Discord"><p>Compte connecté</p><strong>{account?.username || "Compte Discord"}</strong><button type="button" onClick={() => { setAccountMenuOpen(false); void logout(); }}>Se déconnecter</button></div>}<button type="button" className="account-summary" onClick={() => setAccountMenuOpen(open => !open)} aria-expanded={accountMenuOpen}><span className="account-mini-avatar">{account?.username?.slice(0, 1).toUpperCase() || "?"}</span><span className="account-mini"><strong>{account?.username || "Compte Discord"}</strong><small><i /> Connecté</small></span><b>⌃</b></button></div></aside>{mobileNavOpen && <div className="mobile-nav-backdrop"><section id="mobile-navigation-sheet" className="mobile-nav-sheet" role="dialog" aria-modal="true" aria-label="Tous les modules FyxBot"><header><div><p className="eyebrow">NAVIGATION</p><h2>Tous les modules</h2></div><button type="button" className="mobile-nav-close" onClick={() => setMobileNavOpen(false)} aria-label="Fermer le menu">×</button></header>{navigationGroups.map(group => { const items = group.items.filter(item => !mobilePrimarySet.has(item)); return items.length > 0 && <div className="mobile-nav-group" key={group.label}><p>{group.label}</p><div>{items.map(i => <button type="button" key={i} className={active === i ? "active" : ""} onClick={() => { setActive(i); setMobileNavOpen(false); }}><span aria-hidden="true">{icons[i]}</span><strong>{i}</strong></button>)}</div></div>; })}<div className="mobile-account-card"><span className="account-mini-avatar">{account?.username?.slice(0, 1).toUpperCase() || "?"}</span><div><strong>{account?.username || "Compte Discord"}</strong><small>Compte connecté</small></div><button type="button" onClick={() => { setMobileNavOpen(false); void logout(); }}>Se déconnecter</button></div></section></div>}<section className="content"><header><div><p className="eyebrow">SERVEUR DISCORD</p><h1>{active}</h1><p>Pilotez votre communauté simplement avec FyxBot.</p></div><div className="header-actions"><a className="invite-server" href={INVITE_URL} target="_blank" rel="noreferrer">+ Inviter FyxBot</a><select aria-label="Serveur Discord" className="server" value={selectedGuild} onChange={e => refresh(e.target.value)}>{data?.guilds.map(g => <option key={g.id} value={g.id}>{g.name}</option>)}</select></div></header><div className="hero"><Image className="fyxbot-overview-banner" src="/brand/fyxbot-banner-discord.webp" alt="" fill sizes="(max-width: 650px) 100vw, (max-width: 1000px) calc(100vw - 78px), calc(100vw - 250px)" priority/><div><span className="live"><i /> {data?.bot.online ? "BOT OPÉRATIONNEL" : "CONNEXION EN COURS"}</span><h2>{data ? `${data.guild.name} est entre de bonnes mains.` : "Connexion à votre serveur…"}</h2><p>{notice || (data?.metrics.securityRules === 4 ? "Toutes les protections FyxBot sont actives." : "Quelques réglages peuvent encore renforcer votre serveur.")}</p><div className="hero-actions"><button onClick={() => setActive("Sécurité")}>Voir la sécurité</button><button className="secondary" onClick={() => setActive("Assistance FyxBot")}>Contacter FyxBot</button></div></div><div className="score"><strong>{securityScore ?? "--"}</strong><span>/100</span><small>SCORE DE SÉCURITÉ</small></div></div><div className="stats"><article><span>MEMBRES</span><strong>{data?.guild.members ?? "—"}</strong><small>Serveur actuel</small></article><article><span>COMMANDES</span><strong>{data?.metrics.commands ?? "—"}</strong><small>Disponibles</small></article><article><span>TICKETS OUVERTS</span><strong>{data?.metrics.openTickets ?? "—"}</strong><small>Tickets Discord actifs</small></article><article><span>LATENCE</span><strong>{data ? `${data.bot.ping} ms` : "—"}</strong><small>Discord Gateway</small></article></div><div className="section-title"><div><p className="eyebrow">CONFIGURATION RAPIDE</p><h2>Modules FyxBot</h2></div><span>{configuredModules}/8 configurés</span></div><div className="module-grid">{modules.map(m => <article key={m.name} className={`module ${m.tone}`}><div className="module-icon">{m.icon}</div><div><h3>{m.name}</h3><p>{m.detail}</p></div><button onClick={() => setActive(m.name)} aria-label={`Configurer ${m.name}`}>Configurer →</button></article>)}</div>{config()}</section></main>;
+    return (
+        <main className="shell">
+            <aside className="sidebar">
+                <div className="brand">
+                    <Image className="brand-logo" src="/brand/fyxbot-logo-symbol.svg" alt="" width={40} height={40}/>
+                    <div><strong>FYXBOT</strong><small>CONTROL CENTER · v{CURRENT_RELEASE.version}</small></div>
+                </div>
+                <nav className="desktop-navigation" aria-label="Navigation principale">
+                    {visibleNavigationGroups.map(group => <div className="nav-group" key={group.label}>
+                        <p className="nav-group-label">{group.label}</p>
+                        {group.items.map(item => <button type="button" title={item} className={active === item ? "active" : ""} key={item} onClick={() => openPanel(item)} aria-current={active === item ? "page" : undefined}>
+                            <span className="nav-icon" aria-hidden="true">{icons[item]}</span><span className="nav-label">{item}</span>
+                        </button>)}
+                    </div>)}
+                </nav>
+                <div className="fyxstream-entry">
+                    <p>ESPACE STREAMING</p>
+                    <button type="button" className={active === "FyxStream" ? "active" : ""} onClick={() => openPanel("FyxStream")}>
+                        <span aria-hidden="true">🟣</span><div><strong>FyxStream</strong><small>Twitch et chat en direct</small></div><b aria-hidden="true">→</b>
+                    </button>
+                </div>
+                <nav className="mobile-navigation" aria-label="Navigation mobile">
+                    {mobilePrimaryNavigation.map(item => <button type="button" title={item} className={active === item ? "active" : ""} key={item} onClick={() => openPanel(item)} aria-current={active === item ? "page" : undefined}>
+                        <span className="nav-icon" aria-hidden="true">{icons[item]}</span><span className="nav-label">{item === "Vue d’ensemble" ? "Accueil" : item}</span>
+                    </button>)}
+                    <button type="button" title="Plus de modules" className={!mobilePrimarySet.has(active) || mobileNavOpen ? "active" : ""} onClick={() => setMobileNavOpen(open => !open)} aria-expanded={mobileNavOpen} aria-controls="mobile-navigation-sheet">
+                        <span className="nav-icon" aria-hidden="true">☰</span><span className="nav-label">Plus</span>
+                    </button>
+                </nav>
+                <div className={`sidebar-foot ${accountMenuOpen ? "open" : ""}`}>
+                    {accountMenuOpen && <div className="account-popover" role="dialog" aria-label="Compte Discord"><p>Compte connecté</p><strong>{account?.username || "Compte Discord"}</strong><button type="button" onClick={() => { setAccountMenuOpen(false); void logout(); }}>Se déconnecter</button></div>}
+                    <button type="button" className="account-summary" onClick={() => setAccountMenuOpen(open => !open)} aria-expanded={accountMenuOpen}><span className="account-mini-avatar">{account?.username?.slice(0, 1).toUpperCase() || "?"}</span><span className="account-mini"><strong>{account?.username || "Compte Discord"}</strong><small><i/> Connecté</small></span><b>⌃</b></button>
+                </div>
+            </aside>
+
+            {mobileNavOpen && <div className="mobile-nav-backdrop">
+                <section id="mobile-navigation-sheet" className="mobile-nav-sheet" role="dialog" aria-modal="true" aria-label="Tous les modules FyxBot">
+                    <header><div><p className="eyebrow">NAVIGATION</p><h2>Tous les modules</h2></div><button type="button" className="mobile-nav-close" onClick={() => setMobileNavOpen(false)} aria-label="Fermer le menu">×</button></header>
+                    {visibleNavigationGroups.map(group => {
+                        const items = group.items.filter(item => !mobilePrimarySet.has(item));
+                        return items.length > 0 && <div className="mobile-nav-group" key={group.label}><p>{group.label}</p><div>{items.map(item => <button type="button" key={item} className={active === item ? "active" : ""} onClick={() => openPanel(item)}><span aria-hidden="true">{icons[item]}</span><strong>{item}</strong></button>)}</div></div>;
+                    })}
+                    <button type="button" className={`mobile-fyxstream-card ${active === "FyxStream" ? "active" : ""}`} onClick={() => openPanel("FyxStream")}><span aria-hidden="true">🟣</span><div><strong>FyxStream</strong><small>Votre espace Twitch séparé</small></div><b aria-hidden="true">→</b></button>
+                    <div className="mobile-account-card"><span className="account-mini-avatar">{account?.username?.slice(0, 1).toUpperCase() || "?"}</span><div><strong>{account?.username || "Compte Discord"}</strong><small>Compte connecté</small></div><button type="button" onClick={() => { setMobileNavOpen(false); void logout(); }}>Se déconnecter</button></div>
+                </section>
+            </div>}
+
+            {searchOpen && <div className="panel-search-backdrop">
+                <section className="panel-search-dialog" role="dialog" aria-modal="true" aria-labelledby="panel-search-title">
+                    <header><div><p className="eyebrow">NAVIGATION RAPIDE</p><h2 id="panel-search-title">Rechercher dans FyxBot</h2></div><button type="button" onClick={() => setSearchOpen(false)} aria-label="Fermer la recherche">×</button></header>
+                    <label className="panel-search-field"><span aria-hidden="true">⌕</span><input ref={searchInputRef} value={searchQuery} onChange={event => setSearchQuery(event.target.value)} placeholder="Ex. tickets, sécurité, Twitch…" aria-label="Rechercher un module"/><kbd>Échap</kbd></label>
+                    <div className="panel-search-results">
+                        {searchResults.length === 0 ? <p className="panel-search-empty">Aucun module ne correspond à votre recherche.</p> : searchResults.map(item => <article key={item.name}>
+                            <button type="button" className="panel-search-target" onClick={() => openPanel(item.name)}><span aria-hidden="true">{icons[item.name]}</span><div><strong>{item.name}</strong><small>{item.group}{!SIMPLE_NAVIGATION_ITEMS.has(item.name) && item.name !== "FyxStream" ? " · mode avancé" : ""}</small></div><b aria-hidden="true">→</b></button>
+                            <button type="button" className={favorites.includes(item.name) ? "panel-favorite-toggle active" : "panel-favorite-toggle"} onClick={() => toggleFavorite(item.name)} aria-pressed={favorites.includes(item.name)} aria-label={favorites.includes(item.name) ? `Retirer ${item.name} des favoris` : `Ajouter ${item.name} aux favoris`}>★</button>
+                        </article>)}
+                    </div>
+                    <footer><span><kbd>Ctrl</kbd> + <kbd>K</kbd> pour ouvrir</span><small>{searchablePanelItems.length} espaces disponibles</small></footer>
+                </section>
+            </div>}
+
+            <section className="content">
+                <header>
+                    <div><p className="eyebrow">SERVEUR DISCORD</p><h1>{active}</h1><p>Pilotez votre communauté simplement avec FyxBot.</p></div>
+                    <div className="header-actions">
+                        <div className="panel-utility-row">
+                            <div className="interface-mode" role="group" aria-label="Niveau d’interface">
+                                <button type="button" className={interfaceMode === "simple" ? "active" : ""} aria-pressed={interfaceMode === "simple"} onClick={() => setInterfaceMode("simple")}>Simple</button>
+                                <button type="button" className={interfaceMode === "advanced" ? "active" : ""} aria-pressed={interfaceMode === "advanced"} onClick={() => setInterfaceMode("advanced")}>Avancé</button>
+                            </div>
+                            <button type="button" className="panel-search-trigger" onClick={() => { setAlertsOpen(false); setSearchOpen(true); }} aria-label="Rechercher dans le panel"><span aria-hidden="true">⌕</span><span>Rechercher</span><kbd>Ctrl K</kbd></button>
+                            <div className="panel-alert-control">
+                                <button type="button" className={panelAlerts.length > 0 ? "panel-alert-trigger has-alerts" : "panel-alert-trigger"} onClick={() => { setSearchOpen(false); setAlertsOpen(open => !open); }} aria-expanded={alertsOpen} aria-label={`Ouvrir le centre d’alertes, ${panelAlerts.length} alerte(s)`}><span aria-hidden="true">🔔</span>{panelAlerts.length > 0 && <b>{panelAlerts.length}</b>}</button>
+                                {alertsOpen && <section className="panel-alert-popover" role="dialog" aria-label="Centre d’alertes FyxBot"><header><div><p className="eyebrow">À SURVEILLER</p><h2>Centre d’alertes</h2></div><span>{panelAlerts.length}</span></header>{panelAlerts.length === 0 ? <div className="panel-alert-empty"><span aria-hidden="true">✓</span><strong>Tout est en ordre</strong><p>Aucune action importante n’est requise.</p></div> : <div className="panel-alert-list">{panelAlerts.map(alert => <button type="button" className={alert.tone} key={alert.id} onClick={() => openPanel(alert.target)}><span aria-hidden="true">{alert.icon}</span><div><strong>{alert.title}</strong><small>{alert.detail}</small></div><b aria-hidden="true">→</b></button>)}</div>}</section>}
+                            </div>
+                        </div>
+                        <div className="panel-server-row"><a className="invite-server" href={INVITE_URL} target="_blank" rel="noreferrer">+ Inviter FyxBot</a><select aria-label="Serveur Discord" className="server" value={selectedGuild} onChange={event => refresh(event.target.value)}>{data?.guilds.map(guild => <option key={guild.id} value={guild.id}>{guild.name}</option>)}</select></div>
+                    </div>
+                </header>
+
+                {visibleFavorites.length > 0 && <div className="panel-favorites" aria-label="Modules favoris"><span>★ FAVORIS</span>{visibleFavorites.map(item => <article key={item}><button type="button" onClick={() => openPanel(item)}><i aria-hidden="true">{icons[item]}</i>{item}</button><button type="button" onClick={() => toggleFavorite(item)} aria-label={`Retirer ${item} des favoris`}>×</button></article>)}</div>}
+
+                <div className="hero">
+                    <Image className="fyxbot-overview-banner" src="/brand/fyxbot-banner-discord.webp" alt="" fill sizes="(max-width: 650px) 100vw, (max-width: 1000px) calc(100vw - 78px), calc(100vw - 250px)" priority/>
+                    <div><span className="live"><i/> {data?.bot.online ? "BOT OPÉRATIONNEL" : "CONNEXION EN COURS"}</span><h2>{data ? `${data.guild.name} est entre de bonnes mains.` : "Connexion à votre serveur…"}</h2><p>{notice || (data?.metrics.securityRules === 4 ? "Toutes les protections FyxBot sont actives." : "Quelques réglages peuvent encore renforcer votre serveur.")}</p><div className="hero-actions"><button onClick={() => openPanel("Sécurité")}>Voir la sécurité</button><button className="secondary" onClick={() => openPanel("Assistance FyxBot")}>Contacter FyxBot</button></div></div>
+                    <div className="score"><strong>{securityScore ?? "--"}</strong><span>/100</span><small>SCORE DE SÉCURITÉ</small></div>
+                </div>
+                <div className="stats"><article><span>MEMBRES</span><strong>{data?.guild.members ?? "—"}</strong><small>Serveur actuel</small></article><article><span>COMMANDES</span><strong>{data?.metrics.commands ?? "—"}</strong><small>Disponibles</small></article><article><span>TICKETS OUVERTS</span><strong>{data?.metrics.openTickets ?? "—"}</strong><small>Tickets Discord actifs</small></article><article><span>LATENCE</span><strong>{data ? `${data.bot.ping} ms` : "—"}</strong><small>Discord Gateway</small></article></div>
+                <div className="section-title"><div><p className="eyebrow">CONFIGURATION RAPIDE</p><h2>Modules FyxBot</h2></div><span>{configuredModules}/8 configurés</span></div>
+                <div className="module-grid">{visibleModules.map(module => <article key={module.name} className={`module ${module.tone}`}><div className="module-icon">{module.icon}</div><div><h3>{module.name}</h3><p>{module.detail}</p></div><button onClick={() => openPanel(module.name)} aria-label={`Configurer ${module.name}`}>Configurer →</button></article>)}</div>
+                {config()}
+            </section>
+        </main>
+    );
 }

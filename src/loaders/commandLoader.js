@@ -1,5 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
+const logger = require('../services/logger').logger.child({ component: 'command-loader' });
 
 const commandsDirectory = path.join(__dirname, '..', 'commands');
 
@@ -39,7 +40,7 @@ async function loadCommands(client) {
     }
     client.commands.set(command.data.name, command);
   }
-  console.log(`[FyxBot] ${commands.length} commande(s) chargée(s).`);
+  logger.info({ commandCount: commands.length }, '[FyxBot] Commandes chargées.');
 }
 
 module.exports = { loadCommands, readCommands };

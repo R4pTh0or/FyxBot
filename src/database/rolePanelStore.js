@@ -1,11 +1,11 @@
-const { getConfiguration, setConfiguration } = require('./database');
+const defaultStorage = require('./defaultConfigurationStorage');
 
-function getRolePanelConfig(guildId) {
-  return getConfiguration(guildId, 'rolePanels');
+async function getRolePanelConfig(guildId, storage = defaultStorage) {
+  return storage.getConfiguration(guildId, 'rolePanels');
 }
 
-function setRolePanelConfig(guildId, value) {
-  return setConfiguration(guildId, 'rolePanels', value);
+async function setRolePanelConfig(guildId, value, storage = defaultStorage) {
+  return storage.setConfiguration(guildId, 'rolePanels', value);
 }
 
 module.exports = { getRolePanelConfig, setRolePanelConfig };

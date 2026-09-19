@@ -1,26 +1,26 @@
-const { database } = require('./database');
+const { resolveRuntimeStore } = require('./runtimeStorage');
 
 function activeDatabase(targetDatabase) {
-  return targetDatabase || database;
+  return targetDatabase || require('./database').database;
 }
 
 const staffFields = `user_id AS userId, display_name AS displayName, role,
   granted_by AS grantedBy, created_at AS createdAt, updated_at AS updatedAt`;
 
-function getSupportStaff(userId, targetDatabase) {
+function getSupportStaffSqlite(userId, targetDatabase) {
   return activeDatabase(targetDatabase)
     .prepare(`SELECT ${staffFields} FROM support_staff WHERE user_id = ?`)
     .get(String(userId || '').trim()) || null;
 }
 
-function listSupportStaff(targetDatabase) {
+function listSupportStaffSqlite(targetDatabase) {
   return activeDatabase(targetDatabase)
     .prepare(`SELECT ${staffFields} FROM support_staff
       ORDER BY CASE role WHEN 'administrator' THEN 0 ELSE 1 END, display_name COLLATE NOCASE`)
     .all();
 }
 
-function upsertSupportStaff({ userId, displayName, role, grantedBy }, targetDatabase) {
+function upsertSupportStaffSqlite({ userId, displayName, role, grantedBy }, targetDatabase) {
   const target = activeDatabase(targetDatabase);
   const now = new Date().toISOString();
   target.prepare(`INSERT INTO support_staff
@@ -32,13 +32,41 @@ function upsertSupportStaff({ userId, displayName, role, grantedBy }, targetData
       granted_by = excluded.granted_by,
       updated_at = excluded.updated_at`)
     .run(userId, displayName, role, grantedBy, now, now);
-  return getSupportStaff(userId, target);
+  return getSupportStaffSqlite(userId, target);
 }
 
-function removeSupportStaff(userId, targetDatabase) {
+function removeSupportStaffSqlite(userId, targetDatabase) {
   return activeDatabase(targetDatabase)
     .prepare('DELETE FROM support_staff WHERE user_id = ?')
     .run(String(userId || '').trim()).changes > 0;
+}
+
+async function getSupportStaff(userId, storage) {
+  const selected = resolveRuntimeStore('supportStaff', storage);
+  return selected?.getSupportStaff
+    ? selected.getSupportStaff(userId)
+    : getSupportStaffSqlite(userId, storage);
+}
+
+async function listSupportStaff(storage) {
+  const selected = resolveRuntimeStore('supportStaff', storage);
+  return selected?.listSupportStaff
+    ? selected.listSupportStaff()
+    : listSupportStaffSqlite(storage);
+}
+
+async function upsertSupportStaff(input, storage) {
+  const selected = resolveRuntimeStore('supportStaff', storage);
+  return selected?.upsertSupportStaff
+    ? selected.upsertSupportStaff(input)
+    : upsertSupportStaffSqlite(input, storage);
+}
+
+async function removeSupportStaff(userId, storage) {
+  const selected = resolveRuntimeStore('supportStaff', storage);
+  return selected?.removeSupportStaff
+    ? selected.removeSupportStaff(userId)
+    : removeSupportStaffSqlite(userId, storage);
 }
 
 module.exports = {

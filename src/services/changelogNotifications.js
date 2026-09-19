@@ -2,6 +2,7 @@ const { createHash } = require('node:crypto');
 const { getChangelogConfig, setChangelogConfig } = require('../database/changelogStore');
 const { customMessagePayload } = require('./customMessages');
 const { publishedReleases } = require('./releaseManifest');
+const appLogger = require('./logger').logger.child({ component: 'changelog-notifications' });
 
 const DEFAULT_PUBLIC_URL = 'https://fyxbot-panel-production.up.railway.app/changelog';
 const CHANGELOG_CHANNEL_NAME = '🛠️・changelog';
@@ -31,7 +32,7 @@ async function findExistingChangelogChannel(guild) {
   return selectChangelogChannel(guild, fetched);
 }
 
-async function ensureChangelogChannelName(channel, logger = console) {
+async function ensureChangelogChannelName(channel, logger = appLogger) {
   if (!channel || channel.name === CHANGELOG_CHANNEL_NAME || typeof channel.setName !== 'function') return false;
   try {
     await channel.setName(CHANGELOG_CHANNEL_NAME, 'Nom du salon changelog FyxBot synchronisé');
@@ -175,7 +176,7 @@ async function broadcastPendingChangelogs(client, {
   releases = readPublishedReleases(),
   loadConfig = getChangelogConfig,
   saveConfig = setChangelogConfig,
-  logger = console,
+  logger = appLogger,
 } = {}) {
   let published = 0;
   let configuredGuilds = 0;

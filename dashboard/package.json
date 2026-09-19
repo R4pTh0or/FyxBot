@@ -9,7 +9,7 @@
   "scripts": {
     "release:sync": "node scripts/sync-release-manifest.mjs",
     "predev": "pnpm run release:sync",
-    "dev": "vinext dev",
+    "dev": "vinext dev --hostname 127.0.0.1",
     "prebuild": "pnpm run release:sync",
     "build": "vinext build",
     "prestart": "pnpm run release:sync",
@@ -20,20 +20,20 @@
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
-    "react": "19.2.6",
-    "react-dom": "19.2.6"
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
   },
   "devDependencies": {
-    "@cloudflare/vite-plugin": "1.37.1",
+    "@cloudflare/vite-plugin": "1.56.0",
     "@eslint/js": "9.39.4",
     "@next/eslint-plugin-next": "16.2.6",
-    "@openai/sites-vite-plugin": "0.1.0",
+    "@openai/sites-vite-plugin": "0.2.0",
     "@tailwindcss/postcss": "4.2.1",
     "@types/node": "22.19.19",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
-    "@vitejs/plugin-react": "6.0.2",
-    "@vitejs/plugin-rsc": "0.5.26",
+    "@vitejs/plugin-react": "6.1.1",
+    "@vitejs/plugin-rsc": "0.5.35",
     "drizzle-kit": "0.31.10",
     "eslint": "9.39.4",
     "eslint-plugin-jsx-a11y": "6.10.2",
@@ -41,13 +41,13 @@
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "16.4.0",
     "railway": "3.11.0",
-    "react-server-dom-webpack": "19.2.6",
+    "react-server-dom-webpack": "19.3.0",
     "tailwindcss": "4.2.1",
     "typescript": "5.9.3",
     "typescript-eslint": "8.59.3",
-    "vinext": "1.0.0-beta.2",
-    "vite": "8.0.13",
-    "wrangler": "4.92.0"
+    "vinext": "1.0.0-beta.10",
+    "vite": "8.3.0",
+    "wrangler": "4.135.0"
   },
   "type": "module"
 }

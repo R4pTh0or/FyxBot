@@ -3,6 +3,10 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { getDataDirectory } = require('./dataDirectory');
 
+if (process.env.FYXBOT_STORAGE_BACKEND === 'postgres') {
+  throw new Error('Accès SQLite interdit en mode PostgreSQL : raccordement incomplet.');
+}
+
 const dataDirectory = getDataDirectory();
 const databaseFile = fs.existsSync(path.join(dataDirectory, 'fyxbot.sqlite'))
   || !fs.existsSync(path.join(dataDirectory, 'nexora.sqlite'))
@@ -10,6 +14,89 @@ const databaseFile = fs.existsSync(path.join(dataDirectory, 'fyxbot.sqlite'))
   : path.join(dataDirectory, 'nexora.sqlite');
 const database = new DatabaseSync(databaseFile);
 try { fs.chmodSync(databaseFile, 0o600); } catch { /* Certains volumes Windows ne prennent pas en charge chmod. */ }
+
+const TWITCH_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS twitch_connections (
+    guild_id TEXT PRIMARY KEY,
+    broadcaster_user_id TEXT NOT NULL,
+    broadcaster_login TEXT NOT NULL,
+    broadcaster_display_name TEXT NOT NULL,
+    access_token_encrypted TEXT NOT NULL,
+    refresh_token_encrypted TEXT,
+    scopes TEXT NOT NULL DEFAULT '[]',
+    expires_at TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    connected_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE UNIQUE INDEX IF NOT EXISTS twitch_active_broadcaster
+    ON twitch_connections(broadcaster_user_id) WHERE enabled = 1;
+  CREATE INDEX IF NOT EXISTS twitch_connections_enabled
+    ON twitch_connections(enabled, updated_at);
+
+  CREATE TABLE IF NOT EXISTS twitch_oauth_states (
+    state_hash TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    discord_user_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS twitch_oauth_states_guild
+    ON twitch_oauth_states(guild_id, expires_at);
+
+  CREATE TABLE IF NOT EXISTS twitch_custom_commands (
+    guild_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    response TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    cooldown_seconds INTEGER NOT NULL DEFAULT 5 CHECK (cooldown_seconds BETWEEN 0 AND 3600),
+    access_level TEXT NOT NULL DEFAULT 'everyone'
+      CHECK (access_level IN ('everyone', 'subscriber', 'moderator', 'broadcaster')),
+    usage_count INTEGER NOT NULL DEFAULT 0 CHECK (usage_count >= 0),
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (guild_id, name)
+  );
+
+  CREATE TABLE IF NOT EXISTS twitch_chat_config (
+    guild_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 0 CHECK (enabled IN (0, 1)),
+    prefix TEXT NOT NULL DEFAULT '!',
+    link_protection INTEGER NOT NULL DEFAULT 1 CHECK (link_protection IN (0, 1)),
+    caps_protection INTEGER NOT NULL DEFAULT 1 CHECK (caps_protection IN (0, 1)),
+    repetition_protection INTEGER NOT NULL DEFAULT 1 CHECK (repetition_protection IN (0, 1)),
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS twitch_runtime_status (
+    guild_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL,
+    detail TEXT,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS twitch_processed_messages (
+    guild_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, message_id)
+  );
+  CREATE INDEX IF NOT EXISTS twitch_processed_messages_expiry
+    ON twitch_processed_messages(guild_id, expires_at);
+
+  CREATE TABLE IF NOT EXISTS twitch_eventsub_messages (
+    guild_id TEXT NOT NULL,
+    message_id TEXT NOT NULL,
+    received_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    PRIMARY KEY (guild_id, message_id)
+  );
+  CREATE INDEX IF NOT EXISTS twitch_eventsub_messages_expiry
+    ON twitch_eventsub_messages(guild_id, expires_at);
+`;
+
+function initializeTwitchSchema(targetDatabase = database) {
+  targetDatabase.exec(TWITCH_SCHEMA);
+}
+
 database.exec(`
   PRAGMA busy_timeout = 5000;
   PRAGMA journal_mode = WAL;
@@ -22,6 +109,23 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS dashboard_oauth_states (state_hash TEXT PRIMARY KEY, expires_at INTEGER NOT NULL);
   CREATE TABLE IF NOT EXISTS audit_logs (id INTEGER PRIMARY KEY AUTOINCREMENT, guild_id TEXT NOT NULL, title TEXT NOT NULL, description TEXT NOT NULL, color INTEGER NOT NULL, created_at TEXT NOT NULL);
   CREATE INDEX IF NOT EXISTS audit_logs_guild ON audit_logs(guild_id, id DESC);
+  CREATE TABLE IF NOT EXISTS change_history (
+    id TEXT PRIMARY KEY,
+    guild_id TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    actor_name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    details TEXT NOT NULL DEFAULT '{}',
+    backup_file TEXT,
+    reversible INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'applied',
+    created_at TEXT NOT NULL,
+    rolled_back_at TEXT,
+    rolled_back_by TEXT
+  );
+  CREATE INDEX IF NOT EXISTS change_history_guild ON change_history(guild_id, created_at DESC);
   CREATE TABLE IF NOT EXISTS suggestions (
     id TEXT PRIMARY KEY,
     guild_id TEXT NOT NULL,
@@ -158,6 +262,7 @@ database.exec(`
   );
   CREATE INDEX IF NOT EXISTS support_staff_role ON support_staff(role, updated_at DESC);
 `);
+initializeTwitchSchema(database);
 
 const premiumEntitlementColumns = new Set(database.prepare('PRAGMA table_info(premium_entitlements)').all().map((column) => column.name));
 if (!premiumEntitlementColumns.has('user_id')) {
@@ -211,6 +316,7 @@ module.exports = {
   database,
   getConfiguration,
   getGuildConfigurations,
+  initializeTwitchSchema,
   replaceGuildConfigurations,
   setConfiguration,
 };

@@ -2,5 +2,8 @@ allowBuilds:
   esbuild: true
   sharp: true
   workerd: true
-# Nom technique conservé pour réutiliser l'installation locale existante.
-virtualStoreDir: node_modules/.pnpm-nexora
+virtualStoreDir: node_modules/.pnpm-fyxbot
+overrides:
+  "esbuild@<=0.24.2": 0.25.0
+  "fast-uri@<3.1.6": 3.1.6
+  "js-yaml@<4.3.2": 4.3.2

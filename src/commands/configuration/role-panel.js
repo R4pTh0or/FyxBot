@@ -11,6 +11,7 @@ const { randomUUID } = require('node:crypto');
 const { getRolePanelConfig, setRolePanelConfig } = require('../../database/rolePanelStore');
 const { ROLE_BUTTON_PREFIX } = require('../../services/roleButtons');
 const { assertPremiumLimit } = require('../../services/premiumPlans');
+const { assignableRoleIssue, assignableRoleMessage } = require('../../services/safeAssignableRoles');
 
 function addOptionalRole(command, index, required = false) {
   return command.addRoleOption((option) => option
@@ -52,11 +53,17 @@ module.exports = {
     if (new Set(roles.map((role) => role.id)).size !== roles.length) {
       return interaction.reply({ content: 'Un même rôle ne peut pas apparaître plusieurs fois.', flags: MessageFlags.Ephemeral });
     }
-    const invalidRole = roles.find((role) => role.id === interaction.guild.id || role.managed
-      || interaction.guild.members.me.roles.highest.comparePositionTo(role) <= 0);
+    const invalidRole = roles.find((role) => assignableRoleIssue(interaction.guild, role, {
+      actorMember: interaction.member,
+      actorIsOwner: interaction.guild.ownerId === interaction.user.id,
+    }));
     if (invalidRole) {
+      const issue = assignableRoleIssue(interaction.guild, invalidRole, {
+        actorMember: interaction.member,
+        actorIsOwner: interaction.guild.ownerId === interaction.user.id,
+      });
       return interaction.reply({
-        content: `FyxBot ne peut pas gérer ${invalidRole}. Placez son rôle au-dessus et vérifiez que le rôle choisi n’est pas géré par une intégration.`,
+        content: assignableRoleMessage(issue, invalidRole),
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -64,7 +71,7 @@ module.exports = {
       return interaction.reply({ content: 'Utilisez cette commande dans un salon textuel.', flags: MessageFlags.Ephemeral });
     }
     const current = await getRolePanelConfig(interaction.guildId);
-    assertPremiumLimit(interaction.guildId, 'rolePanels', current?.panels?.length || 0);
+    await assertPremiumLimit(interaction.guildId, 'rolePanels', current?.panels?.length || 0);
 
     const embed = new EmbedBuilder()
       .setColor(0xf97316)

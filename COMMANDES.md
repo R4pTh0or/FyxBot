@@ -104,6 +104,22 @@ Efface tous les avertissements d’un membre.
 
 Les commandes `/warnings` nécessitent la permission **Exclure temporairement des membres**.
 
+### `/modhelp`
+
+Affiche la liste complète des commandes de modération FyxBot disponibles.
+
+### `/slowmode`
+
+Règle le mode lent du salon actuel ou d’un salon choisi. Utilisez `0` seconde pour le désactiver.
+
+**Permission requise :** Gérer les salons
+
+### `/lock` et `/unlock`
+
+Verrouillent un salon pour les membres ou restaurent ensuite ses permissions héritées.
+
+**Permission requise :** Gérer les rôles
+
 ## Informations
 
 ### `/avatar`
@@ -241,6 +257,24 @@ Liste les sources automatiques et leur état de dernière vérification.
 Arrête la surveillance d’une source grâce à l’identifiant affiché par `/social sources`.
 
 La permission **Gérer les messages** est requise. La configuration et la gestion des sources exigent également **Gérer le serveur**.
+
+## Streaming Twitch
+
+Le module Streaming est piloté depuis le Control Center. Il permet :
+
+- la connexion et la déconnexion d’une chaîne Twitch par son administrateur ;
+- l’activation du chat FyxBot et le choix du préfixe ;
+- la création, la modification, l’activation et la suppression de commandes personnalisées ;
+- un délai par utilisateur et par commande, ainsi que des niveaux d’accès ;
+- les protections facultatives contre les liens, les majuscules excessives et les répétitions.
+
+Les commandes de chat réservées à FyxBot sont `!commands`, `!discord`, `!socials`,
+`!uptime`, `!mod`, `!ban`, `!unban`, `!timeout`, `!clear` et `!slow`. Les six
+dernières commandes sont réservées aux modérateurs Twitch et au diffuseur. Une
+reconnexion Twitch depuis le panel est nécessaire lors de leur première activation
+afin d’accorder les permissions de modération officielles. Une commande personnalisée ne
+peut pas reprendre un nom réservé. Si un autre bot Twitch possède une commande
+du même nom, il peut toujours produire une réponse externe supplémentaire.
 
 ## Communauté
 

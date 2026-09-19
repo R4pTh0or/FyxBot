@@ -1,9 +1,9 @@
 const { randomUUID } = require('node:crypto');
-const { database } = require('./database');
 const { CLOSED_SUPPORT_STATUSES } = require('../services/supportManagement');
+const { resolveRuntimeStore } = require('./runtimeStorage');
 
 function activeDatabase(targetDatabase) {
-  return targetDatabase || database;
+  return targetDatabase || require('./database').database;
 }
 
 const requestFields = `id, guild_id AS guildId, guild_name AS guildName,
@@ -11,7 +11,7 @@ const requestFields = `id, guild_id AS guildId, guild_name AS guildName,
   priority, status, created_at AS createdAt, updated_at AS updatedAt,
   last_message_at AS lastMessageAt, closed_at AS closedAt`;
 
-function createSupportRequest({ guildId, guildName, requesterId, requesterName, category, subject, priority, message }, targetDatabase) {
+function createSupportRequestSqlite({ guildId, guildName, requesterId, requesterName, category, subject, priority, message }, targetDatabase) {
   const target = activeDatabase(targetDatabase);
   const id = randomUUID();
   const messageId = randomUUID();
@@ -36,10 +36,10 @@ function createSupportRequest({ guildId, guildName, requesterId, requesterName, 
     target.exec('ROLLBACK');
     throw error;
   }
-  return getSupportRequest(id, target);
+  return getSupportRequestSqlite(id, target);
 }
 
-function listSupportRequests({ requesterId = null, guildId = null, includeAll = false, status = null, limit = 100 } = {}, targetDatabase) {
+function listSupportRequestsSqlite({ requesterId = null, guildId = null, includeAll = false, status = null, limit = 100 } = {}, targetDatabase) {
   const target = activeDatabase(targetDatabase);
   const clauses = [];
   const parameters = [];
@@ -65,13 +65,13 @@ function listSupportRequests({ requesterId = null, guildId = null, includeAll = 
       updated_at DESC LIMIT ?`).all(...parameters);
 }
 
-function getSupportRequest(id, targetDatabase) {
+function getSupportRequestSqlite(id, targetDatabase) {
   return activeDatabase(targetDatabase).prepare(`SELECT ${requestFields} FROM support_requests WHERE id = ?`).get(id) || null;
 }
 
-function getSupportConversation(id, targetDatabase) {
+function getSupportConversationSqlite(id, targetDatabase) {
   const target = activeDatabase(targetDatabase);
-  const request = getSupportRequest(id, target);
+  const request = getSupportRequestSqlite(id, target);
   if (!request) return null;
   const messages = target.prepare(`SELECT id, request_id AS requestId, author_id AS authorId,
     author_name AS authorName, author_role AS authorRole, body, created_at AS createdAt
@@ -82,13 +82,13 @@ function getSupportConversation(id, targetDatabase) {
   return { request, messages, events };
 }
 
-function countOpenSupportRequests(requesterId, targetDatabase) {
+function countOpenSupportRequestsSqlite(requesterId, targetDatabase) {
   const placeholders = CLOSED_SUPPORT_STATUSES.map(() => '?').join(', ');
   return activeDatabase(targetDatabase).prepare(`SELECT COUNT(*) AS total FROM support_requests
     WHERE requester_id = ? AND status NOT IN (${placeholders})`).get(requesterId, ...CLOSED_SUPPORT_STATUSES).total;
 }
 
-function addSupportMessage({ requestId, authorId, authorName, authorRole, body }, targetDatabase) {
+function addSupportMessageSqlite({ requestId, authorId, authorName, authorRole, body }, targetDatabase) {
   const target = activeDatabase(targetDatabase);
   const now = new Date().toISOString();
   const id = randomUUID();
@@ -108,9 +108,9 @@ function addSupportMessage({ requestId, authorId, authorName, authorRole, body }
   return id;
 }
 
-function updateSupportRequest({ requestId, status, priority, actorId, actorName }, targetDatabase) {
+function updateSupportRequestSqlite({ requestId, status, priority, actorId, actorName }, targetDatabase) {
   const target = activeDatabase(targetDatabase);
-  const current = getSupportRequest(requestId, target);
+  const current = getSupportRequestSqlite(requestId, target);
   if (!current) return null;
   const changes = [];
   if (current.status !== status) changes.push(`Statut : ${current.status} → ${status}`);
@@ -131,7 +131,56 @@ function updateSupportRequest({ requestId, status, priority, actorId, actorName 
     target.exec('ROLLBACK');
     throw error;
   }
-  return getSupportRequest(requestId, target);
+  return getSupportRequestSqlite(requestId, target);
+}
+
+async function createSupportRequest(input, storage) {
+  storage = resolveRuntimeStore('support', storage);
+  return storage?.createSupportRequest
+    ? storage.createSupportRequest(input)
+    : createSupportRequestSqlite(input, storage);
+}
+
+async function listSupportRequests(options = {}, storage) {
+  storage = resolveRuntimeStore('support', storage);
+  return storage?.listSupportRequests
+    ? storage.listSupportRequests(options)
+    : listSupportRequestsSqlite(options, storage);
+}
+
+async function getSupportRequest(id, storage) {
+  storage = resolveRuntimeStore('support', storage);
+  return storage?.getSupportRequest
+    ? storage.getSupportRequest(id)
+    : getSupportRequestSqlite(id, storage);
+}
+
+async function getSupportConversation(id, storage) {
+  storage = resolveRuntimeStore('support', storage);
+  return storage?.getSupportConversation
+    ? storage.getSupportConversation(id)
+    : getSupportConversationSqlite(id, storage);
+}
+
+async function countOpenSupportRequests(requesterId, storage) {
+  storage = resolveRuntimeStore('support', storage);
+  return storage?.countOpenSupportRequests
+    ? storage.countOpenSupportRequests(requesterId)
+    : countOpenSupportRequestsSqlite(requesterId, storage);
+}
+
+async function addSupportMessage(input, storage) {
+  storage = resolveRuntimeStore('support', storage);
+  return storage?.addSupportMessage
+    ? storage.addSupportMessage(input)
+    : addSupportMessageSqlite(input, storage);
+}
+
+async function updateSupportRequest(input, storage) {
+  storage = resolveRuntimeStore('support', storage);
+  return storage?.updateSupportRequest
+    ? storage.updateSupportRequest(input)
+    : updateSupportRequestSqlite(input, storage);
 }
 
 module.exports = {

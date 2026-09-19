@@ -91,40 +91,40 @@ test('applique des droits Support distincts au propriétaire, aux administrateur
   }), true);
 });
 
-test('valide, attribue, modifie et retire un rôle Support', () => {
+test('valide, attribue, modifie et retire un rôle Support', async () => {
   const target = supportDatabase();
   const input = normalizeSupportStaffInput({ userId: '123456789012345678', role: 'moderator' });
   assert.deepEqual(input, { userId: '123456789012345678', role: 'moderator' });
   assert.throws(() => normalizeSupportStaffInput({ userId: '123', role: 'moderator' }), /Identifiant Discord/);
   assert.throws(() => normalizeSupportStaffInput({ userId: '123456789012345678', role: 'owner' }), /Rôle Support/);
-  upsertSupportStaff({ ...input, displayName: 'Nova', grantedBy: 'owner' }, target);
-  assert.equal(getSupportStaff(input.userId, target).role, 'moderator');
-  upsertSupportStaff({ ...input, role: 'administrator', displayName: 'Nova', grantedBy: 'owner' }, target);
-  assert.equal(listSupportStaff(target)[0].role, 'administrator');
-  assert.equal(removeSupportStaff(input.userId, target), true);
-  assert.equal(getSupportStaff(input.userId, target), null);
+  await upsertSupportStaff({ ...input, displayName: 'Nova', grantedBy: 'owner' }, target);
+  assert.equal((await getSupportStaff(input.userId, target)).role, 'moderator');
+  await upsertSupportStaff({ ...input, role: 'administrator', displayName: 'Nova', grantedBy: 'owner' }, target);
+  assert.equal((await listSupportStaff(target))[0].role, 'administrator');
+  assert.equal(await removeSupportStaff(input.userId, target), true);
+  assert.equal(await getSupportStaff(input.userId, target), null);
 });
 
-test('crée une conversation, ajoute des réponses et historise les décisions', () => {
+test('crée une conversation, ajoute des réponses et historise les décisions', async () => {
   const target = supportDatabase();
-  const created = createSupportRequest({
+  const created = await createSupportRequest({
     guildId: 'guild-a', guildName: 'Serveur A', requesterId: 'user-a', requesterName: 'Alice',
     category: 'technical', subject: 'Commande indisponible', priority: 'normal',
     message: 'La commande de configuration retourne une erreur depuis ce matin.',
   }, target);
   assert.equal(created.status, 'open');
-  assert.equal(countOpenSupportRequests('user-a', target), 1);
-  assert.equal(listSupportRequests({ requesterId: 'user-a' }, target).length, 1);
-  assert.equal(listSupportRequests({ requesterId: 'user-b' }, target).length, 0);
+  assert.equal(await countOpenSupportRequests('user-a', target), 1);
+  assert.equal((await listSupportRequests({ requesterId: 'user-a' }, target)).length, 1);
+  assert.equal((await listSupportRequests({ requesterId: 'user-b' }, target)).length, 0);
 
-  addSupportMessage({
+  await addSupportMessage({
     requestId: created.id, authorId: 'owner', authorName: 'Antony', authorRole: 'staff',
     body: 'Je vérifie la commande et je reviens vers vous.',
   }, target);
-  updateSupportRequest({
+  await updateSupportRequest({
     requestId: created.id, status: 'waiting_user', priority: 'high', actorId: 'owner', actorName: 'Antony',
   }, target);
-  const conversation = getSupportConversation(created.id, target);
+  const conversation = await getSupportConversation(created.id, target);
   assert.equal(conversation.messages.length, 2);
   assert.equal(conversation.messages[1].authorRole, 'staff');
   assert.equal(conversation.events.length, 2);

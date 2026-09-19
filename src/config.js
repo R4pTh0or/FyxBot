@@ -1,5 +1,11 @@
+// @ts-check
+
 const requiredVariables = ['DISCORD_TOKEN', 'CLIENT_ID'];
 
+/**
+ * Charge et valide les paramètres nécessaires au bot.
+ * @param {{ requireClientId?: boolean }} [options]
+ */
 function getConfig({ requireClientId = false } = {}) {
   const required = requireClientId ? requiredVariables : ['DISCORD_TOKEN'];
   const missing = required.filter((name) => !process.env[name]?.trim());
@@ -10,8 +16,11 @@ function getConfig({ requireClientId = false } = {}) {
     );
   }
 
+  const token = process.env.DISCORD_TOKEN?.trim();
+  if (!token) throw new Error('Configuration manquante : DISCORD_TOKEN.');
+
   return Object.freeze({
-    token: process.env.DISCORD_TOKEN.trim(),
+    token,
     clientId: process.env.CLIENT_ID?.trim(),
     guildId: process.env.GUILD_ID?.trim() || null,
     environment: process.env.NODE_ENV?.trim() || 'development',

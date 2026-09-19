@@ -32,67 +32,79 @@ function progress(keys) {
   return { steps: all.map((key) => ({ key, complete: keys.includes(key) })) };
 }
 
-test('mesure l’activation sans attribuer rétroactivement la cohorte 24 heures', () => {
+test('mesure l’activation sans attribuer rétroactivement la cohorte 24 heures', async () => {
   const targetDatabase = createDatabase();
   targetDatabase.prepare("INSERT INTO guild_installations VALUES ('old', 'Ancien', 10, '2026-08-01T10:00:00.000Z', '2026-08-24T10:00:00.000Z', NULL)").run();
   targetDatabase.prepare("INSERT INTO guild_installations VALUES ('new', 'Nouveau', 20, '2026-08-24T10:00:00.000Z', '2026-08-24T10:00:00.000Z', NULL)").run();
-  ensureActivationTracking('old', { targetDatabase, now: '2026-08-24T12:00:00.000Z' });
-  ensureActivationTracking('new', { targetDatabase, now: '2026-08-24T12:00:00.000Z' });
-  recordActivationProgress('old', progress(['structure', 'logs', 'welcome', 'security', 'rules']), {
+  await ensureActivationTracking('old', { targetDatabase, now: '2026-08-24T12:00:00.000Z' });
+  await ensureActivationTracking('new', { targetDatabase, now: '2026-08-24T12:00:00.000Z' });
+  await recordActivationProgress('old', progress(['structure', 'logs', 'welcome', 'security', 'rules']), {
     targetDatabase,
     now: '2026-08-24T12:10:00.000Z',
   });
-  recordActivationProgress('new', progress(['structure', 'logs', 'welcome', 'security']), {
+  await recordActivationProgress('new', progress(['structure', 'logs', 'welcome', 'security']), {
     targetDatabase,
     now: '2026-08-24T12:30:00.000Z',
   });
 
-  const stats = getActivationStats(['old', 'new'], { targetDatabase, now: '2026-08-24T13:00:00.000Z' });
+  const stats = await getActivationStats(['old', 'new'], { targetDatabase, now: '2026-08-24T13:00:00.000Z' });
   assert.equal(stats.currentActivatedGuilds, 2);
   assert.equal(stats.activationRate, 100);
   assert.equal(stats.eligibleNewGuilds, 1);
   assert.equal(stats.activatedWithin24h, 1);
   assert.equal(stats.activation24hRate, 100);
   assert.equal(stats.activeGuilds30d, 2);
+  assert.equal(stats.stalledGuilds7d, 0);
+  assert.deepEqual(stats.completionDistribution.map((bucket) => bucket.guilds), [0, 2, 0]);
   assert.equal(stats.steps.find((step) => step.key === 'rules').completedGuilds, 1);
   assert.deepEqual(JSON.parse(targetDatabase.prepare("SELECT step_keys FROM guild_activation_progress WHERE guild_id = 'new'").get().step_keys), [
     'structure', 'logs', 'welcome', 'security',
   ]);
 });
 
-test('compte aussi un serveur actif par commande sans stocker d’utilisateur', () => {
+test('compte aussi un serveur actif par commande sans stocker d’utilisateur', async () => {
   const targetDatabase = createDatabase();
   targetDatabase.prepare("INSERT INTO guild_installations VALUES ('command-only', 'Commande', 5, '2026-08-24T10:00:00.000Z', '2026-08-24T10:00:00.000Z', NULL)").run();
-  ensureActivationTracking('command-only', { targetDatabase, now: '2026-08-24T10:00:00.000Z' });
+  await ensureActivationTracking('command-only', { targetDatabase, now: '2026-08-24T10:00:00.000Z' });
   targetDatabase.prepare("INSERT INTO command_usage VALUES ('2026-08-24', 'command-only', 'ping', 1, 0)").run();
-  const stats = getActivationStats(['command-only'], { targetDatabase, now: '2026-08-24T13:00:00.000Z' });
+  const stats = await getActivationStats(['command-only'], { targetDatabase, now: '2026-08-24T13:00:00.000Z' });
   assert.equal(stats.activeGuilds30d, 1);
   assert.equal(stats.currentActivatedGuilds, 0);
 });
 
-test('attend la fin des 24 heures avant de compter une installation non activée comme un échec', () => {
+test('attend la fin des 24 heures avant de compter une installation non activée comme un échec', async () => {
   const targetDatabase = createDatabase();
   targetDatabase.prepare("INSERT INTO guild_installations VALUES ('pending', 'Récent', 5, '2026-08-24T10:00:00.000Z', '2026-08-24T10:00:00.000Z', NULL)").run();
-  ensureActivationTracking('pending', { targetDatabase, now: '2026-08-24T10:05:00.000Z' });
-  recordActivationProgress('pending', progress(['structure']), {
+  await ensureActivationTracking('pending', { targetDatabase, now: '2026-08-24T10:05:00.000Z' });
+  await recordActivationProgress('pending', progress(['structure']), {
     targetDatabase,
     now: '2026-08-24T11:00:00.000Z',
   });
 
-  const pending = getActivationStats(['pending'], { targetDatabase, now: '2026-08-24T20:00:00.000Z' });
+  const pending = await getActivationStats(['pending'], { targetDatabase, now: '2026-08-24T20:00:00.000Z' });
   assert.equal(pending.eligibleNewGuilds, 0);
   assert.equal(pending.pendingNewGuilds, 1);
   assert.equal(pending.activation24hRate, null);
 
-  const completedWindow = getActivationStats(['pending'], { targetDatabase, now: '2026-08-25T11:00:00.000Z' });
+  const completedWindow = await getActivationStats(['pending'], { targetDatabase, now: '2026-08-25T11:00:00.000Z' });
   assert.equal(completedWindow.eligibleNewGuilds, 1);
   assert.equal(completedWindow.pendingNewGuilds, 0);
   assert.equal(completedWindow.activation24hRate, 0);
 });
 
-test('classe comme historique un serveur observé pour la première fois après 24 heures', () => {
+test('classe comme historique un serveur observé pour la première fois après 24 heures', async () => {
   const targetDatabase = createDatabase();
   targetDatabase.prepare("INSERT INTO guild_installations VALUES ('boundary', 'Historique', 5, '2026-08-24T10:00:00.000Z', '2026-08-25T10:00:00.000Z', NULL)").run();
-  const row = ensureActivationTracking('boundary', { targetDatabase, now: '2026-08-25T10:00:00.000Z' });
+  const row = await ensureActivationTracking('boundary', { targetDatabase, now: '2026-08-25T10:00:00.000Z' });
   assert.equal(row.baseline, 1);
+});
+
+test('identifie les parcours incomplets sans activité depuis sept jours', async () => {
+  const targetDatabase = createDatabase();
+  targetDatabase.prepare("INSERT INTO guild_installations VALUES ('stalled', 'En pause', 5, '2026-08-01T10:00:00.000Z', '2026-08-01T10:00:00.000Z', NULL)").run();
+  await ensureActivationTracking('stalled', { targetDatabase, now: '2026-08-02T10:00:00.000Z' });
+  await recordActivationProgress('stalled', progress(['structure']), { targetDatabase, now: '2026-08-02T11:00:00.000Z' });
+  const stats = await getActivationStats(['stalled'], { targetDatabase, now: '2026-08-20T12:00:00.000Z' });
+  assert.equal(stats.stalledGuilds7d, 1);
+  assert.deepEqual(stats.completionDistribution.map((bucket) => bucket.guilds), [1, 0, 0]);
 });

@@ -5,13 +5,16 @@ const os = require('node:os');
 const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
+const { inspectEncryptedBackup } = require('../scripts/check-railway-backup-readonly');
 const {
   backupObjectKey,
+  createExternalBackup,
   decryptBackup,
   encryptBackup,
   getExternalBackupConfig,
   selectExpiredBackupKeys,
   snapshotDatabase,
+  startExternalBackupScheduler,
 } = require('../src/services/externalBackup');
 
 function validEnvironment(overrides = {}) {
@@ -34,6 +37,23 @@ test('chiffre et restaure une sauvegarde sans perte', () => {
   const restored = decryptBackup(encrypted, key);
   assert.deepEqual(restored.database, source);
   assert.equal(restored.header.algorithm, 'aes-256-gcm');
+});
+
+test('contrôle une restauration chiffrée entièrement en mémoire, sans toucher à Railway', () => {
+  const sqlite = new DatabaseSync(':memory:');
+  try {
+    sqlite.exec('CREATE TABLE configurations (guild_id TEXT PRIMARY KEY)');
+    sqlite.prepare('INSERT INTO configurations VALUES (?)').run('test');
+    const key = crypto.randomBytes(32);
+    const encrypted = encryptBackup(sqlite.serialize(), key);
+    const inspected = inspectEncryptedBackup(encrypted, key);
+    assert.equal(inspected.expectedTables, 1);
+    assert.equal(inspected.totalExpectedTables, 27);
+    assert.ok(inspected.missingTables.includes('warnings'));
+    assert.throws(() => inspectEncryptedBackup(encrypted, crypto.randomBytes(32)));
+  } finally {
+    sqlite.close();
+  }
 });
 
 test('restaure aussi une sauvegarde créée avant le renommage', () => {
@@ -64,6 +84,11 @@ test('valide toutes les variables sensibles avant activation', () => {
   const config = getExternalBackupConfig(validEnvironment());
   assert.equal(config.intervalDays, 7);
   assert.equal(config.retention, 8);
+});
+
+test('refuse de planifier une sauvegarde PostgreSQL sans connexion', () => {
+  const config = getExternalBackupConfig(validEnvironment());
+  assert.throws(() => startExternalBackupScheduler({ backend: 'postgres', config }), /Connexion PostgreSQL absente/);
 });
 
 test('reconnaît les anciennes variables Railway pendant la transition', () => {
@@ -112,5 +137,38 @@ test('crée une copie SQLite compatible sans utiliser serialize()', async () => 
     restoredDatabase?.close();
     sourceDatabase.close();
     await fs.rm(temporaryDirectory, { force: true, recursive: true });
+  }
+});
+
+test('la rétention SQLite ne supprime jamais une sauvegarde PostgreSQL', async () => {
+  const sourceDatabase = new DatabaseSync(':memory:');
+  try {
+    sourceDatabase.exec('CREATE TABLE example (id INTEGER PRIMARY KEY); INSERT INTO example VALUES (1);');
+    const config = { bucket: 'test', prefix: 'fyxbot/weekly', retention: 1,
+      encryptionKey: crypto.randomBytes(32) };
+    let uploaded;
+    let deleted;
+    const s3 = { async send(command) {
+      if (command.constructor.name === 'PutObjectCommand') {
+        uploaded = command.input;
+        return {};
+      }
+      if (command.constructor.name === 'HeadObjectCommand') return { ContentLength: uploaded.Body.length };
+      if (command.constructor.name === 'ListObjectsV2Command') return { Contents: [
+        { Key: 'fyxbot/weekly/2026-01-01.sqlite.gz.enc', LastModified: new Date('2026-01-01') },
+        { Key: uploaded.Key, LastModified: new Date() },
+        { Key: 'fyxbot/weekly/postgres/2026-01-01.json.gz.enc', LastModified: new Date('2026-01-01') },
+      ] };
+      if (command.constructor.name === 'DeleteObjectsCommand') {
+        deleted = command.input.Delete.Objects.map((item) => item.Key);
+        return {};
+      }
+      throw new Error(`Commande inattendue : ${command.constructor.name}`);
+    } };
+    const result = await createExternalBackup(config, { s3, sourceDatabase });
+    assert.equal(result.deleted, 1);
+    assert.deepEqual(deleted, ['fyxbot/weekly/2026-01-01.sqlite.gz.enc']);
+  } finally {
+    sourceDatabase.close();
   }
 });

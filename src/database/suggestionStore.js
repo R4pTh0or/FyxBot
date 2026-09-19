@@ -1,6 +1,6 @@
 const fs = require('node:fs/promises');
 const path = require('node:path');
-const { getConfiguration, setConfiguration } = require('./database');
+const defaultStorage = require('./defaultConfigurationStorage');
 const { getDataDirectory } = require('./dataDirectory');
 
 const dataDirectory = getDataDirectory();
@@ -16,12 +16,12 @@ async function readDatabase() {
   }
 }
 
-async function getSuggestionConfig(guildId) {
-  return getConfiguration(guildId, 'suggestions');
+async function getSuggestionConfig(guildId, storage = defaultStorage) {
+  return storage.getConfiguration(guildId, 'suggestions');
 }
 
-async function setSuggestionConfig(guildId, config) {
-  return setConfiguration(guildId, 'suggestions', config);
+async function setSuggestionConfig(guildId, config, storage = defaultStorage) {
+  return storage.setConfiguration(guildId, 'suggestions', config);
   /* Legacy JSON writer retained temporarily for rollback.
   const operation = writeQueue.then(async () => {
     const database = await readDatabase();

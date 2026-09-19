@@ -1,11 +1,11 @@
-const { database } = require('./database');
 const { STEP_DEFINITIONS } = require('../services/onboardingProgress');
+const { resolveRuntimeStore } = require('./runtimeStorage');
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const ACTIVATION_THRESHOLD = 4;
 
 function activeDatabase(targetDatabase) {
-  return targetDatabase || database;
+  return targetDatabase || require('./database').database;
 }
 
 function asDate(value) {
@@ -17,7 +17,7 @@ function percent(value, total) {
   return total > 0 ? Math.round((value / total) * 100) : 0;
 }
 
-function ensureActivationTracking(guildId, { targetDatabase, now = new Date() } = {}) {
+function ensureActivationTrackingSqlite(guildId, { targetDatabase, now = new Date() } = {}) {
   if (!guildId) return null;
   const store = activeDatabase(targetDatabase);
   const observedAt = asDate(now);
@@ -32,9 +32,9 @@ function ensureActivationTracking(guildId, { targetDatabase, now = new Date() } 
   return store.prepare('SELECT * FROM guild_activation_progress WHERE guild_id = ?').get(guildId);
 }
 
-function recordActivationProgress(guildId, progress, { targetDatabase, now = new Date() } = {}) {
+function recordActivationProgressSqlite(guildId, progress, { targetDatabase, now = new Date() } = {}) {
   const store = activeDatabase(targetDatabase);
-  ensureActivationTracking(guildId, { targetDatabase: store, now });
+  ensureActivationTrackingSqlite(guildId, { targetDatabase: store, now });
   const observedAt = asDate(now).toISOString();
   const stepKeys = (progress?.steps || []).filter((step) => step.complete).map((step) => step.key);
   const completedSteps = stepKeys.length;
@@ -46,7 +46,7 @@ function recordActivationProgress(guildId, progress, { targetDatabase, now = new
   return store.prepare('SELECT * FROM guild_activation_progress WHERE guild_id = ?').get(guildId);
 }
 
-function getActivationStats(guildIds, { targetDatabase, now = new Date() } = {}) {
+function getActivationStatsSqlite(guildIds, { targetDatabase, now = new Date() } = {}) {
   const store = activeDatabase(targetDatabase);
   const ids = [...new Set([...guildIds].filter(Boolean))];
   const allowed = new Set(ids);
@@ -80,6 +80,7 @@ function getActivationStats(guildIds, { targetDatabase, now = new Date() } = {})
     return activatedAt.getTime() - firstSeen.getTime() <= DAY_MS;
   }).length;
   const sinceDate = new Date(asDate(now).getTime() - 29 * DAY_MS);
+  const stalledBefore = new Date(asDate(now).getTime() - 7 * DAY_MS);
   const sinceDay = sinceDate.toISOString().slice(0, 10);
   const activeIds = new Set(store.prepare('SELECT DISTINCT guild_id AS guildId FROM command_usage WHERE day >= ?').all(sinceDay)
     .map((row) => row.guildId).filter((guildId) => allowed.has(guildId)));
@@ -90,6 +91,14 @@ function getActivationStats(guildIds, { targetDatabase, now = new Date() } = {})
     const completedGuilds = rows.filter((row) => row.stepKeys.includes(step.key)).length;
     return { key: step.key, title: step.title, completedGuilds, rate: percent(completedGuilds, ids.length) };
   });
+  const stalledGuilds7d = rows.filter((row) => row.completedSteps < ACTIVATION_THRESHOLD
+    && row.lastObservedAt
+    && new Date(row.lastObservedAt) < stalledBefore).length;
+  const completionDistribution = [
+    { key: 'starting', title: '0 à 3 étapes', guilds: rows.filter((row) => row.completedSteps < ACTIVATION_THRESHOLD).length },
+    { key: 'activated', title: '4 à 6 étapes', guilds: rows.filter((row) => row.completedSteps >= ACTIVATION_THRESHOLD && row.completedSteps < STEP_DEFINITIONS.length).length },
+    { key: 'complete', title: '7 étapes', guilds: rows.filter((row) => row.completedSteps >= STEP_DEFINITIONS.length).length },
+  ];
   return {
     threshold: ACTIVATION_THRESHOLD,
     totalSteps: STEP_DEFINITIONS.length,
@@ -101,10 +110,12 @@ function getActivationStats(guildIds, { targetDatabase, now = new Date() } = {})
     activatedWithin24h,
     activation24hRate: eligibleRows.length ? percent(activatedWithin24h, eligibleRows.length) : null,
     activeGuilds30d: activeIds.size,
+    stalledGuilds7d,
     averageCompletedSteps: rows.length
       ? Math.round((rows.reduce((total, row) => total + row.completedSteps, 0) / rows.length) * 10) / 10
       : 0,
     steps,
+    completionDistribution,
     guilds: rows.map((row) => ({
       guildId: row.guildId,
       completedSteps: row.completedSteps,
@@ -112,6 +123,27 @@ function getActivationStats(guildIds, { targetDatabase, now = new Date() } = {})
       lastObservedAt: row.lastObservedAt,
     })),
   };
+}
+
+async function ensureActivationTracking(guildId, options = {}) {
+  const storage = resolveRuntimeStore('creatorStats', options.storage);
+  return storage?.ensureActivationTracking
+    ? storage.ensureActivationTracking(guildId, options)
+    : ensureActivationTrackingSqlite(guildId, options);
+}
+
+async function recordActivationProgress(guildId, progress, options = {}) {
+  const storage = resolveRuntimeStore('creatorStats', options.storage);
+  return storage?.recordActivationProgress
+    ? storage.recordActivationProgress(guildId, progress, options)
+    : recordActivationProgressSqlite(guildId, progress, options);
+}
+
+async function getActivationStats(guildIds, options = {}) {
+  const storage = resolveRuntimeStore('creatorStats', options.storage);
+  return storage?.getActivationStats
+    ? storage.getActivationStats(guildIds, options)
+    : getActivationStatsSqlite(guildIds, options);
 }
 
 module.exports = {

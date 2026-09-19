@@ -1,7 +1,7 @@
-const { database } = require('../database/database');
+const { resolveRuntimeStore } = require('../database/runtimeStorage');
 
 function activeDatabase(targetDatabase) {
-  return targetDatabase || database;
+  return targetDatabase || require('../database/database').database;
 }
 
 function configuredPremiumSkuIds(environment = process.env) {
@@ -22,11 +22,16 @@ function isTestEntitlement(entitlement) {
   return Boolean(entitlement?.test);
 }
 
-function upsertPremiumEntitlement(entitlement, {
+async function upsertPremiumEntitlement(entitlement, {
   targetDatabase,
+  storage,
   now = new Date(),
   deleted,
 } = {}) {
+  storage = resolveRuntimeStore('premiumEntitlements', storage);
+  if (storage?.upsertPremiumEntitlement) {
+    return storage.upsertPremiumEntitlement(entitlement, { now, deleted });
+  }
   const store = activeDatabase(targetDatabase);
   const id = String(entitlement?.id || '');
   const skuId = String(entitlement?.skuId || entitlement?.sku_id || '');
@@ -68,11 +73,16 @@ function entitlementIsActive(row, now) {
     && (!endsAt || endsAt > observedAt);
 }
 
-function getGuildPremiumEntitlementState(guildId, {
+async function getGuildPremiumEntitlementState(guildId, {
   targetDatabase,
+  storage,
   skuIds = configuredPremiumSkuIds(),
   now = new Date(),
 } = {}) {
+  storage = resolveRuntimeStore('premiumEntitlements', storage);
+  if (storage?.getGuildPremiumEntitlementState) {
+    return storage.getGuildPremiumEntitlementState(guildId, { skuIds, now });
+  }
   const ids = [...new Set(skuIds.filter((id) => /^\d{17,20}$/.test(String(id))).map(String))];
   if (!guildId || ids.length === 0) {
     return { configured: ids.length > 0, active: false, detected: 0, test: false };
@@ -89,11 +99,16 @@ function getGuildPremiumEntitlementState(guildId, {
   };
 }
 
-function getUserPremiumEntitlementState(userId, {
+async function getUserPremiumEntitlementState(userId, {
   targetDatabase,
+  storage,
   skuIds = configuredPremiumSkuIds(),
   now = new Date(),
 } = {}) {
+  storage = resolveRuntimeStore('premiumEntitlements', storage);
+  if (storage?.getUserPremiumEntitlementState) {
+    return storage.getUserPremiumEntitlementState(userId, { skuIds, now });
+  }
   const ids = [...new Set(skuIds.filter((id) => /^\d{17,20}$/.test(String(id))).map(String))];
   if (!userId || ids.length === 0) {
     return { configured: ids.length > 0, active: false, detected: 0, test: false };
@@ -112,9 +127,14 @@ function getUserPremiumEntitlementState(userId, {
 
 async function syncPremiumEntitlements(client, {
   targetDatabase,
+  storage,
   skuIds = configuredPremiumSkuIds(),
   now = new Date(),
 } = {}) {
+  storage = resolveRuntimeStore('premiumEntitlements', storage);
+  if (storage?.syncPremiumEntitlements) {
+    return storage.syncPremiumEntitlements(client, { skuIds, now });
+  }
   const ids = [...new Set(skuIds.map(String).filter((id) => /^\d{17,20}$/.test(id)))];
   if (ids.length === 0) return { configured: false, synced: 0 };
   const manager = client.application?.entitlements;
@@ -130,7 +150,7 @@ async function syncPremiumEntitlements(client, {
       excludeDeleted: false,
     });
     for (const entitlement of batch.values()) {
-      upsertPremiumEntitlement(entitlement, { targetDatabase, now });
+      await upsertPremiumEntitlement(entitlement, { targetDatabase, now });
       observedIds.add(String(entitlement.id));
     }
     if (batch.size < 100) break;

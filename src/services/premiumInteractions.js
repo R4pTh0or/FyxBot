@@ -12,7 +12,7 @@ async function handlePremiumButton(interaction) {
     });
     return true;
   }
-  const result = claimFounderAccess(interaction.user.id, interaction.guildId);
+  const result = await claimFounderAccess(interaction.user.id, interaction.guildId);
   const expiration = new Date(result.endsAt).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' });
   await interaction.update({
     content: `✅ **FyxBot Premium est actif sur ce serveur jusqu’au ${expiration}.**\nAucun moyen de paiement n’a été demandé et aucun abonnement ne sera lancé automatiquement.`,

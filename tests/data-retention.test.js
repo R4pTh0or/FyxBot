@@ -10,6 +10,7 @@ function createDatabase() {
     CREATE TABLE warnings (id TEXT, guild_id TEXT, user_id TEXT, moderator_id TEXT, reason TEXT, created_at TEXT);
     CREATE TABLE dashboard_sessions (token_hash TEXT PRIMARY KEY, value TEXT, expires_at INTEGER);
     CREATE TABLE audit_logs (id INTEGER, guild_id TEXT, title TEXT, description TEXT, color INTEGER, created_at TEXT);
+    CREATE TABLE change_history (id TEXT, guild_id TEXT);
     CREATE TABLE suggestions (id TEXT, guild_id TEXT, channel_id TEXT, message_id TEXT, author_id TEXT, author_name TEXT, anonymous INTEGER, idea TEXT, status TEXT, reviewed_by TEXT, reviewed_at TEXT, created_at TEXT);
     CREATE TABLE guild_installations (guild_id TEXT PRIMARY KEY, guild_name TEXT, member_count INTEGER, first_seen_at TEXT, last_seen_at TEXT, removed_at TEXT);
     CREATE TABLE command_usage (day TEXT, guild_id TEXT, command_name TEXT, success_count INTEGER, failure_count INTEGER);
@@ -21,6 +22,13 @@ function createDatabase() {
     CREATE TABLE support_requests (id TEXT PRIMARY KEY, guild_id TEXT);
     CREATE TABLE support_messages (id TEXT PRIMARY KEY, request_id TEXT);
     CREATE TABLE support_events (id TEXT PRIMARY KEY, request_id TEXT);
+    CREATE TABLE twitch_connections (guild_id TEXT);
+    CREATE TABLE twitch_oauth_states (guild_id TEXT);
+    CREATE TABLE twitch_custom_commands (guild_id TEXT);
+    CREATE TABLE twitch_chat_config (guild_id TEXT);
+    CREATE TABLE twitch_runtime_status (guild_id TEXT);
+    CREATE TABLE twitch_processed_messages (guild_id TEXT);
+    CREATE TABLE twitch_eventsub_messages (guild_id TEXT);
   `);
   return targetDatabase;
 }
@@ -31,6 +39,7 @@ test('supprime les données du serveur et conserve uniquement une statistique an
   targetDatabase.prepare("INSERT INTO configurations VALUES (?, 'birthdays', '{}', '2026-08-24')").run(guildId);
   targetDatabase.prepare("INSERT INTO warnings VALUES ('warn', ?, 'user', 'mod', 'raison', '2026-08-24')").run(guildId);
   targetDatabase.prepare("INSERT INTO audit_logs VALUES (1, ?, 'titre', 'description', 1, '2026-08-24')").run(guildId);
+  targetDatabase.prepare("INSERT INTO change_history VALUES ('change', ?)").run(guildId);
   targetDatabase.prepare("INSERT INTO suggestions VALUES ('idea', ?, 'channel', 'message', 'user', 'User', 0, 'idée', 'pending', NULL, NULL, '2026-08-24')").run(guildId);
   targetDatabase.prepare("INSERT INTO guild_installations VALUES (?, 'Serveur privé', 42, '2026-08-01', '2026-08-24', NULL)").run(guildId);
   targetDatabase.prepare("INSERT INTO command_usage VALUES ('2026-08-24', ?, 'ping', 1, 0)").run(guildId);
@@ -42,6 +51,9 @@ test('supprime les données du serveur et conserve uniquement une statistique an
   targetDatabase.prepare("INSERT INTO support_requests VALUES ('support', ?)").run(guildId);
   targetDatabase.prepare("INSERT INTO support_messages VALUES ('support-message', 'support')").run();
   targetDatabase.prepare("INSERT INTO support_events VALUES ('support-event', 'support')").run();
+  for (const table of ['twitch_connections', 'twitch_oauth_states', 'twitch_custom_commands', 'twitch_chat_config', 'twitch_runtime_status', 'twitch_processed_messages', 'twitch_eventsub_messages']) {
+    targetDatabase.prepare(`INSERT INTO ${table} VALUES (?)`).run(guildId);
+  }
   targetDatabase.prepare('INSERT INTO dashboard_sessions VALUES (?, ?, ?)').run(
     'session',
     JSON.stringify({ user: { id: 'user' }, manageableGuildIds: [guildId, '987654321098765432'] }),
@@ -57,7 +69,7 @@ test('supprime les données du serveur et conserve uniquement une statistique an
     deleteBackups: async (id) => { calls.push(['backups', id]); return 2; },
   });
 
-  for (const table of ['configurations', 'warnings', 'audit_logs', 'suggestions', 'command_usage', 'guild_activation_progress', 'premium_entitlements', 'premium_user_guilds']) {
+  for (const table of ['configurations', 'warnings', 'audit_logs', 'change_history', 'suggestions', 'command_usage', 'guild_activation_progress', 'premium_entitlements', 'premium_user_guilds']) {
     assert.equal(targetDatabase.prepare(`SELECT COUNT(*) AS total FROM ${table} WHERE guild_id = ?`).get(guildId).total, 0);
   }
   assert.equal(targetDatabase.prepare('SELECT COUNT(*) AS total FROM community_giveaways WHERE guild_id = ?').get(guildId).total, 0);
@@ -65,12 +77,22 @@ test('supprime les données du serveur et conserve uniquement une statistique an
   assert.equal(targetDatabase.prepare("SELECT COUNT(*) AS total FROM support_requests WHERE guild_id = ?").get(guildId).total, 0);
   assert.equal(targetDatabase.prepare("SELECT COUNT(*) AS total FROM support_messages WHERE request_id = 'support'").get().total, 0);
   assert.equal(targetDatabase.prepare("SELECT COUNT(*) AS total FROM support_events WHERE request_id = 'support'").get().total, 0);
+  for (const table of ['twitch_connections', 'twitch_oauth_states', 'twitch_custom_commands', 'twitch_chat_config', 'twitch_runtime_status', 'twitch_processed_messages', 'twitch_eventsub_messages']) {
+    assert.equal(targetDatabase.prepare(`SELECT COUNT(*) AS total FROM ${table} WHERE guild_id = ?`).get(guildId).total, 0);
+  }
   assert.equal(result.giveaways, 1);
   assert.equal(result.giveawayEntries, 1);
   assert.equal(result.supportRequests, 1);
   assert.equal(result.supportMessages, 1);
   assert.equal(result.supportEvents, 1);
   assert.equal(result.premiumGuildLinks, 1);
+  assert.equal(result.twitchConnections, 1);
+  assert.equal(result.twitchOAuthStates, 1);
+  assert.equal(result.twitchCommands, 1);
+  assert.equal(result.twitchChatConfig, 1);
+  assert.equal(result.twitchRuntime, 1);
+  assert.equal(result.twitchProcessedMessages, 1);
+  assert.equal(result.twitchEventSubMessages, 1);
   assert.deepEqual({ ...targetDatabase.prepare('SELECT guild_id, guild_name, member_count, removed_at FROM guild_installations').get() }, {
     guild_id: 'removed:test',
     guild_name: 'Serveur supprimé',

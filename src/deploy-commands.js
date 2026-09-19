@@ -6,6 +6,7 @@ const {
 } = require('discord.js');
 const { getConfig } = require('./config');
 const { readCommands } = require('./loaders/commandLoader');
+const logger = require('./services/logger').logger.child({ component: 'command-deployment' });
 
 function serializeCommands(commands, deployGlobally) {
   return commands.map((command) => {
@@ -34,9 +35,9 @@ async function deployCommands() {
 
   if (clearGuildDeployment) {
     if (!config.guildId) throw new Error('GUILD_ID est nécessaire pour retirer les commandes locales.');
-    console.log(`[FyxBot] Retrait des anciennes commandes locales du serveur ${config.guildId}...`);
+    logger.info({ guildId: config.guildId }, '[FyxBot] Retrait des anciennes commandes locales.');
     await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: [] });
-    console.log('[FyxBot] Commandes locales retirées. Les commandes globales restent actives.');
+    logger.info('[FyxBot] Commandes locales retirées. Les commandes globales restent actives.');
     return;
   }
 
@@ -47,15 +48,15 @@ async function deployCommands() {
     : Routes.applicationCommands(config.clientId);
 
   const scope = config.guildId && !globalDeployment ? `le serveur ${config.guildId}` : 'tous les serveurs';
-  console.log(`[FyxBot] Publication de ${body.length} commande(s) sur ${scope}...`);
+  logger.info({ commandCount: body.length, scope }, '[FyxBot] Publication des commandes slash.');
   await rest.put(route, { body });
-  console.log('[FyxBot] Commandes slash publiées avec succès.');
+  logger.info('[FyxBot] Commandes slash publiées avec succès.');
 }
 
 if (require.main === module) {
-  require('dotenv').config();
+  require('dotenv').config({ quiet: true });
   deployCommands().catch((error) => {
-    console.error('[FyxBot] Échec de la publication :', error);
+    logger.fatal({ err: error }, '[FyxBot] Échec de la publication des commandes.');
     process.exitCode = 1;
   });
 }

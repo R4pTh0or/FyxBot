@@ -9,8 +9,9 @@ const {
   PutObjectCommand,
   S3Client,
 } = require('@aws-sdk/client-s3');
-const { database } = require('../database/database');
 const { getDataDirectory } = require('../database/dataDirectory');
+const { exportPostgresSnapshot, restorePostgresSnapshot } = require('../database/postgresSnapshot');
+const appLogger = require('./logger').logger.child({ component: 'external-backup' });
 
 const BACKUP_MAGIC = 'FYXBOT-BACKUP-V1';
 const LEGACY_BACKUP_MAGIC = 'NEXORA-BACKUP-V1';
@@ -157,6 +158,15 @@ function backupObjectKey(config, createdAt) {
   return `${config.prefix}/${timestamp}.sqlite.gz.enc`;
 }
 
+function postgresBackupConfig(config) {
+  return { ...config, prefix: `${config.prefix}/postgres` };
+}
+
+function postgresBackupObjectKey(config, createdAt) {
+  const timestamp = createdAt.toISOString().replace(/[:.]/g, '-');
+  return `${postgresBackupConfig(config).prefix}/${timestamp}.json.gz.enc`;
+}
+
 function selectExpiredBackupKeys(objects, retention) {
   return [...objects]
     .filter((item) => item.Key)
@@ -183,8 +193,9 @@ async function listBackupObjects(s3, config) {
   return objects;
 }
 
-async function pruneOldBackups(s3, config) {
-  const expiredKeys = selectExpiredBackupKeys(await listBackupObjects(s3, config), config.retention);
+async function pruneOldBackups(s3, config, suffix = '.sqlite.gz.enc') {
+  const objects = (await listBackupObjects(s3, config)).filter((item) => String(item.Key || '').endsWith(suffix));
+  const expiredKeys = selectExpiredBackupKeys(objects, config.retention);
   for (let index = 0; index < expiredKeys.length; index += 1000) {
     const batch = expiredKeys.slice(index, index + 1000);
     await s3.send(new DeleteObjectsCommand({
@@ -215,8 +226,9 @@ async function snapshotDatabase(sourceDatabase, temporaryDirectory = getDataDire
   }
 }
 
-async function createExternalBackup(config, { s3 = createS3Client(config), sourceDatabase = database } = {}) {
-  const serialized = await snapshotDatabase(sourceDatabase);
+async function createExternalBackup(config, { s3 = createS3Client(config), sourceDatabase } = {}) {
+  const sqliteDatabase = sourceDatabase || require('../database/database').database;
+  const serialized = await snapshotDatabase(sqliteDatabase);
   const createdAt = new Date();
   const encrypted = encryptBackup(serialized, config.encryptionKey, createdAt);
   const key = backupObjectKey(config, createdAt);
@@ -236,6 +248,35 @@ async function createExternalBackup(config, { s3 = createS3Client(config), sourc
   return { createdAt, deleted, encryptedBytes: encrypted.length, key, sourceBytes: serialized.length };
 }
 
+async function createPostgresExternalBackup(config, { pool, s3 = createS3Client(config), schema = 'fyxbot' } = {}) {
+  if (!pool) throw new TypeError('Une connexion PostgreSQL est requise pour la sauvegarde.');
+  const createdAt = new Date();
+  const snapshot = await exportPostgresSnapshot(pool, { schema, now: createdAt });
+  const serialized = Buffer.from(JSON.stringify(snapshot), 'utf8');
+  const encrypted = encryptBackup(serialized, config.encryptionKey, createdAt);
+  const key = postgresBackupObjectKey(config, createdAt);
+
+  await s3.send(new PutObjectCommand({
+    Bucket: config.bucket,
+    Key: key,
+    Body: encrypted,
+    ContentType: 'application/octet-stream',
+    Metadata: { format: snapshot.format, created: createdAt.toISOString() },
+  }));
+  const verification = await s3.send(new HeadObjectCommand({ Bucket: config.bucket, Key: key }));
+  if (Number(verification.ContentLength) !== encrypted.length) {
+    throw new Error('La taille de la sauvegarde PostgreSQL distante est incorrecte.');
+  }
+  const deleted = await pruneOldBackups(s3, postgresBackupConfig(config), '.json.gz.enc');
+  return { createdAt, deleted, encryptedBytes: encrypted.length, key, sourceBytes: serialized.length };
+}
+
+async function restorePostgresExternalBackup(encrypted, encryptionKey, pool, { schema = 'fyxbot' } = {}) {
+  const { database: serialized } = decryptBackup(encrypted, encryptionKey);
+  const snapshot = JSON.parse(serialized.toString('utf8'));
+  return restorePostgresSnapshot(pool, snapshot, { schema });
+}
+
 async function readBackupState(stateFile) {
   try {
     return JSON.parse(await fs.readFile(stateFile, 'utf8'));
@@ -252,17 +293,20 @@ async function writeBackupState(stateFile, result) {
   })}\n`, { encoding: 'utf8', mode: 0o600 });
 }
 
-function startExternalBackupScheduler({ logger = console } = {}) {
+function startExternalBackupScheduler({ logger = appLogger, backend = 'sqlite', pool, schema = 'fyxbot', config: providedConfig } = {}) {
   let config;
   try {
-    config = getExternalBackupConfig();
+    config = providedConfig || getExternalBackupConfig();
   } catch (error) {
     logger.error(`[FyxBot][Backup] ${error.message}`);
     return { stop() {} };
   }
   if (!config.enabled) return { stop() {} };
+  if (backend !== 'sqlite' && backend !== 'postgres') throw new Error('Moteur de sauvegarde inconnu.');
+  if (backend === 'postgres' && !pool) throw new Error('Connexion PostgreSQL absente pour la sauvegarde externe.');
 
-  const stateFile = path.join(getDataDirectory(), '.external-backup-state.json');
+  const stateFile = path.join(getDataDirectory(), backend === 'postgres'
+    ? '.external-backup-postgres-state.json' : '.external-backup-state.json');
   const intervalMs = config.intervalDays * 24 * 60 * 60 * 1000;
   let stopped = false;
   let running = false;
@@ -275,7 +319,9 @@ function startExternalBackupScheduler({ logger = console } = {}) {
       const state = await readBackupState(stateFile);
       const lastBackupAt = state?.lastBackupAt ? Date.parse(state.lastBackupAt) : 0;
       if (!Number.isFinite(lastBackupAt) || Date.now() - lastBackupAt >= intervalMs) {
-        const result = await createExternalBackup(config);
+        const result = backend === 'postgres'
+          ? await createPostgresExternalBackup(config, { pool, schema })
+          : await createExternalBackup(config);
         await writeBackupState(stateFile, result);
         logger.log(`[FyxBot][Backup] Sauvegarde externe réussie : ${result.key} (${result.encryptedBytes} octets).`);
       }
@@ -306,9 +352,12 @@ module.exports = {
   LEGACY_BACKUP_MAGIC,
   backupObjectKey,
   createExternalBackup,
+  createPostgresExternalBackup,
   decryptBackup,
   encryptBackup,
   getExternalBackupConfig,
+  postgresBackupObjectKey,
+  restorePostgresExternalBackup,
   selectExpiredBackupKeys,
   snapshotDatabase,
   startExternalBackupScheduler,

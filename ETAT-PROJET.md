@@ -1,108 +1,139 @@
 # État du projet FyxBot
 
-Dernière consolidation : **25 août 2026**.
+Dernière consolidation locale : **19 septembre 2026**.
 
-Ce document est la référence courte pour savoir ce qui est terminé, ce qui reste à faire et ce qui doit être conservé.
+Ce document décrit l'état fonctionnel du code présent dans `C:\Fyxbot`. Les
+identifiants de déploiement Railway ne sont plus figés ici : ils changent à
+chaque livraison et doivent être relus directement dans Railway avant toute
+annonce publique.
 
-## État de la production
+## Version actuelle
 
-- Projet Railway : `FyxBot`.
-- Services : `fyxbot-bot` et `fyxbot-panel`.
+- Version applicative : **1.5.0**.
 - Site public : <https://fyxbot-panel-production.up.railway.app/>.
-- Bot Discord : connecté sous `FyxBot#5572`.
-- Dernier déploiement public du bot : `9d969046-4ade-4faa-ba13-6c95bc307259`, état `SUCCESS`.
-- Dernier déploiement public du panel : `fcf39982-e89f-4167-82cd-8fe069aaf6b7`, état `SUCCESS`.
-- Surveillance Sentinel : contrôle automatique toutes les 15 minutes, sans service Railway supplémentaire.
-- Santé observée après le dernier déploiement : site, API et authentification HTTP 200 ; Discord connecté ; aucun incident applicatif récent.
+- Services Railway : `fyxbot-bot` et `fyxbot-panel`.
+- Commandes Discord présentes dans le code : **34**.
+- Manifeste partagé par le bot, le panel et le changelog :
+  `dashboard/app/release-manifest.json`.
+- La prochaine version majeure est suivie dans
+  [docs/V2-READINESS.md](docs/V2-READINESS.md).
 
-## Terminé
+## Fonctionnalités disponibles
 
-### Bot Discord
+### Discord
 
-- Base Node.js et discord.js v14 modulaire avec chargeurs de commandes et d’événements.
-- Commandes globales sans doublon et documentation dans `COMMANDES.md`.
-- Modération : bannissement, expulsion, timeout, avertissements, effacement et débannissement.
-- Tickets privés avec plusieurs panneaux, destinations différentes, modification depuis le panel, transcripts, archivage et réouverture par le staff.
-- Logs, accueil et départ, suggestions, rôles interactifs et sécurité configurable.
-- Conception adaptative d’un serveur à partir d’une description libre, avec aperçu obligatoire, rôles et salons personnalisés au format `emoji・nom`.
-- Audit, configuration complète et retour arrière local avec restauration des rôles, salons, permissions et liens de configuration.
-- Règlement interactif avec modèles, rôle après acceptation et correction de `/reglement publier`.
-- Anniversaires volontaires avec messages par défaut et fuseaux horaires.
-- Notifications sociales manuelles et automatiques pour YouTube/Twitch, sondages Discord natifs et salons vocaux temporaires.
-- Événements Discord natifs et concours persistants avec participation unique, tirage automatique et effacement des participants après le résultat.
-- Constructeur de messages Discord : texte, embed, image, miniature, couleur et bouton HTTPS.
-- Salon changelog créé par le setup et diffusion sans doublon des versions publiées.
-- Suppression des données d’un serveur après désinstallation et statistiques anonymisées.
+- Modération : ban, kick, timeout, avertissements, nettoyage, mode lent,
+  verrouillage et aide modérateur.
+- Tickets privés avec plusieurs panneaux, transcripts et gestion depuis le
+  panel.
+- Accueil, règlement, rôles interactifs, suggestions, logs et AutoMod.
+- Anniversaires, notifications sociales, événements, concours et salons vocaux
+  temporaires.
+- Constructeur de messages avec texte, embed, images et boutons.
+- Configuration adaptative depuis une description libre, avec aperçu,
+  synchronisation, reconstruction, sauvegarde et restauration.
+- Permissions guidées selon les espaces Accueil, Membres et Staff.
+- Changelog automatique dans `🛠️・changelog` sans doublon par serveur.
 
-### Panel web
+### Control Center
 
-- Control Center public sur Railway avec connexion Discord OAuth.
-- Sélection de plusieurs serveurs, invitation publique du bot et actualisation automatique.
-- Configuration des modules Discord depuis le site.
-- Interface rouge et orange, logo, bannière, mascotte et emojis cohérents.
-- Compte utilisateur accessible depuis le bloc inférieur gauche et déconnexion intégrée.
-- Espace créateur avec installations, serveurs, membres couverts et usages des commandes.
-- Pages publiques : changelog, support, conditions d’utilisation et politique de confidentialité.
-- Référencement technique : métadonnées, `robots.txt` et sitemap.
-- Adresse publique de support : `fyxbotassistance@outlook.fr`.
-- Parcours guidé en sept étapes, gestion des sources sociales et aperçu Premium sans facturation.
-- Statistiques d’activation avec cohorte 24 heures complète : les installations encore dans leur fenêtre ne sont pas comptées comme des échecs.
-- Section Communauté enrichie pour créer et suivre les événements programmés et les concours actifs.
+- Connexion Discord OAuth et sélection des serveurs administrables.
+- Configuration isolée pour chaque serveur.
+- Navigation V2, recherche de modules et affichage adapté au mobile.
+- Parcours de démarrage et espace FyxPilot.
+- Bibliothèque des messages publiés avec modification et corbeille.
+- Support privé avec rôles Modérateur et Administrateur.
+- Espace Créateur masqué aux utilisateurs non autorisés.
+- Pages publiques : changelog, support, conditions d'utilisation et politique
+  de confidentialité.
 
-### Sécurité, données et exploitation
+### FyxStream
 
-- Audits web et cybersécurité réalisés, avec contrôles d’accès renforcés.
-- Isolation des configurations par serveur et vérification des permissions avant les actions sensibles.
-- Sauvegardes externes Cloudflare R2 compressées et chiffrées en AES-256-GCM.
-- Tests de restauration chiffrée, conservation limitée et compatibilité avec les anciennes sauvegardes.
-- Simulations de charge avec 50 puis 200 utilisateurs virtuels.
-- Suite locale actuelle : **89 tests bot réussis sur 89** et **3 tests panel réussis sur 3** ; lint et build du panel réussis.
-- Services et projet Railway renommés avec le branding FyxBot.
-- Équipe IA documentée dans `AGENTS-EQUIPE.md` : Nova, Orion, Sentinel, Aegis et Ember.
-- Test réel de `/reglement publier` réussi sur le serveur de développement.
-- Validation réelle de la 1.2.0 réussie dans `🤖・commandes-bot` : message d’arrivée, notification sociale, sondage natif et contrôle anti-doublon.
-- Demande de vérification envoyée à Discord.
-- Version 1.3.0 déployée publiquement avec les événements Discord natifs, les concours automatiques et leur gestion depuis le panel.
-- Premium reporté : la commande n’est ni publiée sur Discord ni chargée par le bot public ; aucun paiement, produit ou contrôle d’accès Premium n’est actif.
+- Espace Twitch intégré au panel FyxBot.
+- Connexion OAuth, jetons chiffrés, chat IRC et événements Twitch.
+- Commandes personnalisées, cooldowns et protections simples.
+- Commandes de modération : `!mod`, `!ban`, `!unban`, `!timeout`, `!clear` et
+  `!slow`.
+- Les anciennes connexions Twitch doivent être reconnectées une fois si elles
+  ne possèdent pas encore les nouvelles autorisations de modération.
 
-## Reste à faire
+### Premium
 
-### Priorité immédiate
+- Accès Fondateur de trente jours pour les cent premiers utilisateurs Discord,
+  sans carte ni renouvellement automatique.
+- Un accès actif peut être appliqué à plusieurs serveurs administrés par son
+  bénéficiaire.
+- Limites Free et Premium actives sans suppression des réglages existants à
+  l'expiration.
+- Le parcours payant définitif, les tarifs et le cycle complet des SKU Discord
+  restent à valider avant commercialisation.
 
-1. Recueillir le retour du créateur sur les événements, concours et écrans Communauté de la version 1.3.0.
-2. Continuer le contrôle de l’indexation Google : le 25 août 2026, Search Console indique que les données sont encore en cours de traitement et la recherche publique ne retourne pas encore FyxBot. Ne pas demander une nouvelle indexation tant que ce traitement n’est pas terminé.
+### Données et sécurité
 
-### Avant FyxBot Premium
+- Stockage PostgreSQL implémenté pour le runtime, avec mode SQLite conservé pour
+  le développement et le retour arrière contrôlé.
+- Sauvegardes externes chiffrées en AES-256-GCM dans un stockage S3/R2.
+- Sauvegardes locales de structure Discord chiffrées.
+- Isolation des données par serveur, protection CSRF, validation des entrées,
+  limites de débit et contrôle des permissions sensibles.
+- Purge des sessions expirées et parcours de suppression des données d'un
+  serveur.
+- Journalisation structurée avec Pino.
 
-1. Valider précisément les limites proposées dans `PREMIUM-PREPARATION.md` et fixer les tarifs.
-2. Configurer les Applications Premium Discord, les produits et les droits d’accès (*entitlements*).
-3. Tester les droits Discord préparés localement avec un produit de test, puis définir les contrôles Premium côté bot et panel. La gestion des créations, fins, suppressions et remboursements de droits est déjà préparée sans application des limitations.
-4. Tester tout le parcours d’achat en environnement de développement avant activation publique.
-5. Utiliser l’agent marketing Pulse pour préparer la communication, puis attendre la vérification Discord et la stabilisation du référencement avant toute diffusion.
+## Travail restant avant la V2
 
-### Améliorations futures
+### Priorité 1 — stabilisation
 
-- Étendre les notifications automatiques aux autres plateformes disposant d’un accès officiel adapté.
-- Statistiques communautaires supplémentaires, annulation d’événement et nouveau tirage manuel encadré.
-- Domaine personnalisé pour remplacer progressivement l’adresse Railway publique.
-- Test réel de restauration depuis Cloudflare R2, en plus des tests automatisés locaux.
-- Migration de la configuration Railway vers le nouveau format d’infrastructure avant l’échéance annoncée par Railway.
+- [x] Aligner le README avec FyxStream et l'état actuel du stockage.
+- [x] Créer une définition vérifiable de la V2.
+- [x] Validation locale complète : syntaxe et types valides, **275 tests bot**,
+  **5 tests panel**, lint et build réussis.
+- [x] `C:\Fyxbot` est relié à l'historique GitHub sur la branche locale
+  `v2-development-2026-09-19`. Le dépôt vide imbriqué dans `dashboard` a été
+  conservé dans `.safety` et aucun envoi GitHub n'a été effectué.
+- [ ] Vérifier en lecture seule le moteur de stockage réellement actif en
+  production et l'état courant des deux services Railway.
+- [ ] Effectuer un exercice réel de restauration R2 vers une destination
+  isolée, sans écraser la production.
 
-## Nettoyage effectué
+### Priorité 2 — FyxPilot Studio
 
-- Ancien fichier vide `500` supprimé.
-- Quatre anciens journaux locaux de Nexora et du dashboard supprimés.
-- Sorties de compilation locales `.next`, `.vinext` et `dist` supprimées ; elles seront recréées au prochain build.
-- Verrou npm du dashboard supprimé, car le projet utilise pnpm et `pnpm-lock.yaml`.
-- Trois icônes génériques du modèle web, non utilisées par FyxBot, supprimées.
-- Le cache `.wrangler` n’a pas été supprimé complètement car le panel local l’utilise actuellement. Il pourra être retiré après l’arrêt du processus local.
+- Comparatif visuel des ajouts, modifications et suppressions.
+- Brouillons de configuration enregistrables.
+- Historique détaillé avec auteur, date et résultat.
+- Retour arrière guidé depuis le panel.
+- Aperçu complet des permissions finales avant application.
+
+### Priorité 3 — FyxStream
+
+- Reconnexion guidée lorsque des autorisations Twitch manquent.
+- Historique borné des actions de modération.
+- Alerte en cas d'expiration ou d'échec OAuth.
+- Validation réelle sur une chaîne de développement.
+
+### Priorité 4 — Premium et publication
+
+- Valider la matrice Free/Premium, les tarifs et le nombre de serveurs inclus.
+- Tester les SKU Discord de bout en bout.
+- Ajouter les accès gratuits propriétaire/partenaire avec journal d'audit.
+- Créer une préproduction Railway distincte après accord sur son coût.
+- Passer une période de stabilité de sept jours avant l'annonce 2.0.0.
+- Préparer le changelog, le tutoriel et la campagne Pulse.
 
 ## Conservé volontairement
 
-- `.env` et les données locales : nécessaires au développement et jamais publiées par les scripts de déploiement.
-- `data/nexora.sqlite` et les préfixes `nexora_*` : compatibilité et migration des anciennes installations.
+- `.env` et les données locales, qui ne doivent jamais être publiés.
+- Les préfixes historiques `nexora_*` nécessaires à la compatibilité des
+  anciennes installations.
 - Les sauvegardes de structure Discord dans `data/backups`.
-- Les originaux graphiques dans `Image` et les versions optimisées dans `dashboard/public/brand`.
-- `node_modules` et les caches de paquets utiles aux tests locaux.
-- L’exemple D1 du dashboard, utile si une base web séparée est ajoutée plus tard.
-- Les conversations FyxBot encore visibles : elles contiennent l’historique de création ou la configuration du serveur. Aucun ancien chat FyxBot clairement inutile n’est actuellement listé.
+- Les sources graphiques dans `Image` et les ressources optimisées du panel.
+- Le mode SQLite tant que la procédure de retour arrière PostgreSQL reste utile.
+
+## Règles de publication
+
+- Travailler et tester d'abord dans `C:\Fyxbot`.
+- Ne jamais déployer automatiquement après une simple modification locale.
+- Obtenir une confirmation explicite avant une livraison Railway, une action
+  Discord destructive, une dépense ou une modification de secret.
+- Après un déploiement, attendre l'état Railway `SUCCESS` puis contrôler le
+  panel, l'API, Discord et Twitch.

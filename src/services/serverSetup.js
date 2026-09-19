@@ -89,8 +89,8 @@ function runtimeBlueprint(blueprint) {
   return { source: selected, roles, categories, channels };
 }
 
-function resolveBlueprint(guildId, blueprint) {
-  return blueprint || getServerSetupBlueprint(guildId) || DEFAULT_BLUEPRINT;
+async function resolveBlueprint(guildId, blueprint) {
+  return blueprint || await getServerSetupBlueprint(guildId) || DEFAULT_BLUEPRINT;
 }
 
 const ROLE_DEFINITIONS = Object.freeze(runtimeBlueprint(DEFAULT_BLUEPRINT).roles);
@@ -208,7 +208,7 @@ function permissionProfiles(guild, roles, roleDefinitions = ROLE_DEFINITIONS, me
   };
 }
 
-function resolveMemberAccessRole(guild, roles, rulesConfig = getRulesConfig(guild.id)) {
+function resolveMemberAccessRole(guild, roles, rulesConfig = null) {
   const configuredRole = rulesConfig?.verifiedRoleId
     ? guild.roles.cache.get(rulesConfig.verifiedRoleId)
     : null;
@@ -228,7 +228,7 @@ function rulesTemplateForBlueprint(blueprint) {
 
 async function ensureSetupRules(guild, channel, verifiedRole, blueprint) {
   if (!channel?.isTextBased?.() || !verifiedRole) return null;
-  const current = getRulesConfig(guild.id);
+  const current = await getRulesConfig(guild.id);
   const config = {
     title: current?.title || `Règlement ${guild.name}`,
     content: current?.content || rulesTemplateForBlueprint(blueprint),
@@ -380,9 +380,9 @@ function desiredRolesFromGuild(guild, definitions) {
 async function analyzeServerStructure(guild, fetched = {}, blueprint) {
   if (!fetched.channels) await guild.channels.fetch();
   if (!fetched.roles) await guild.roles.fetch();
-  const desired = runtimeBlueprint(resolveBlueprint(guild.id, blueprint));
+  const desired = runtimeBlueprint(await resolveBlueprint(guild.id, blueprint));
   const roles = desiredRolesFromGuild(guild, desired.roles);
-  const memberAccessRole = resolveMemberAccessRole(guild, roles);
+  const memberAccessRole = resolveMemberAccessRole(guild, roles, await getRulesConfig(guild.id));
   const profiles = permissionProfiles(guild, roles, desired.roles, memberAccessRole);
   const categories = Object.fromEntries(desired.categories.map((definition) => [
     definition.key,
@@ -470,7 +470,7 @@ async function analyzeServerStructure(guild, fetched = {}, blueprint) {
 
 async function setupServer(guild, options = {}) {
   const { synchronizePermissions = true } = options;
-  const selectedBlueprint = options.blueprint || getServerSetupBlueprint(guild.id);
+  const selectedBlueprint = options.blueprint || await getServerSetupBlueprint(guild.id);
   if (!selectedBlueprint) throw new Error('Décrivez d’abord votre serveur avec /setup concevoir avant de lancer la configuration.');
   const desired = runtimeBlueprint(selectedBlueprint);
   const missingPermissions = missingSetupPermissions(guild);
@@ -480,7 +480,7 @@ async function setupServer(guild, options = {}) {
   const roleResults = {};
   for (const definition of desired.roles) roleResults[definition.key] = await findOrCreateRole(guild, definition, synchronizePermissions);
   const roles = Object.fromEntries(Object.entries(roleResults).map(([key, result]) => [key, result.value]));
-  const memberAccessRole = resolveMemberAccessRole(guild, roles);
+  const memberAccessRole = resolveMemberAccessRole(guild, roles, await getRulesConfig(guild.id));
   const profiles = permissionProfiles(guild, roles, desired.roles, memberAccessRole);
   const categoryResults = {};
   for (const definition of desired.categories) {
@@ -533,7 +533,7 @@ async function setupServer(guild, options = {}) {
     selectedBlueprint,
   );
   if (channelResults.changelog) await initializeChangelogChannel(guild, channelResults.changelog.value);
-  activateServerSetupBlueprint(guild.id, selectedBlueprint);
+  await activateServerSetupBlueprint(guild.id, selectedBlueprint);
 
   const allResults = [...Object.values(roleResults), ...Object.values(categoryResults), ...Object.values(channelResults)];
   const analysis = await analyzeServerStructure(guild, {}, selectedBlueprint);
@@ -554,7 +554,7 @@ async function setupServer(guild, options = {}) {
 }
 
 async function resetServer(guild, options = {}) {
-  const selectedBlueprint = options.blueprint || getServerSetupBlueprint(guild.id);
+  const selectedBlueprint = options.blueprint || await getServerSetupBlueprint(guild.id);
   if (!selectedBlueprint) throw new Error('Décrivez d’abord votre serveur avec /setup concevoir avant de lancer la reconstruction.');
   const backupFile = await backupServer(guild);
   let deletedChannels = 0;

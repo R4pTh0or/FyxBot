@@ -1,6 +1,8 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { DatabaseSync } = require('node:sqlite');
+const { POSTGRES_SCHEMA_SQL } = require('../src/database/postgresSchema');
+const { createPostgresGiveawayStore } = require('../src/database/postgresGiveawayStore');
 const {
   finalizeDueGiveaways,
   recoverInterruptedGiveaways,
@@ -24,11 +26,11 @@ function createDatabase() {
   return targetDatabase;
 }
 
-test('enregistre une seule participation par membre', () => {
+test('enregistre une seule participation par membre', async () => {
   const targetDatabase = createDatabase();
   const now = new Date('2026-08-25T08:30:00.000Z');
-  const first = registerGiveawayEntry('giveaway-a', 'user-a', { targetDatabase, now });
-  const second = registerGiveawayEntry('giveaway-a', 'user-a', { targetDatabase, now });
+  const first = await registerGiveawayEntry('giveaway-a', 'user-a', { targetDatabase, now });
+  const second = await registerGiveawayEntry('giveaway-a', 'user-a', { targetDatabase, now });
   assert.equal(first.joined, true);
   assert.equal(second.joined, false);
   assert.equal(second.participantCount, 1);
@@ -37,7 +39,7 @@ test('enregistre une seule participation par membre', () => {
 test('publie le résultat puis efface les identifiants des participants', async () => {
   const targetDatabase = createDatabase();
   for (const userId of ['user-a', 'user-b', 'user-c']) {
-    registerGiveawayEntry('giveaway-a', userId, { targetDatabase, now: new Date('2026-08-25T08:30:00.000Z') });
+    await registerGiveawayEntry('giveaway-a', userId, { targetDatabase, now: new Date('2026-08-25T08:30:00.000Z') });
   }
   const edits = [];
   const announcements = [];
@@ -61,9 +63,45 @@ test('publie le résultat puis efface les identifiants des participants', async 
   assert.equal(targetDatabase.prepare("SELECT status FROM community_giveaways WHERE giveaway_id = 'giveaway-a'").get().status, 'ended');
 });
 
-test('reprend un tirage interrompu après un redémarrage', () => {
+test('reprend un tirage interrompu après un redémarrage', async () => {
   const targetDatabase = createDatabase();
   targetDatabase.prepare("UPDATE community_giveaways SET status = 'drawing' WHERE giveaway_id = 'giveaway-a'").run();
-  assert.equal(recoverInterruptedGiveaways({ targetDatabase }), 1);
+  assert.equal(await recoverInterruptedGiveaways({ targetDatabase }), 1);
   assert.equal(targetDatabase.prepare("SELECT status FROM community_giveaways WHERE giveaway_id = 'giveaway-a'").get().status, 'active');
+});
+
+test('publie et clôture un concours via PostgreSQL sans toucher à SQLite', async () => {
+  const { PGlite } = await import('@electric-sql/pglite');
+  const database = await PGlite.create();
+  try {
+    await database.exec(`CREATE SCHEMA fyxbot; SET search_path TO fyxbot; ${POSTGRES_SCHEMA_SQL}`);
+    const pool = {
+      query: (sql, params) => database.query(sql, params),
+      connect: async () => ({ query: (sql, params) => database.query(sql, params), release() {} }),
+    };
+    const storage = createPostgresGiveawayStore(pool);
+    await storage.createGiveaway({
+      giveawayId: 'giveaway-pg', guildId: 'guild-a', channelId: 'channel-a', messageId: 'message-a',
+      prize: 'Grade VIP', winnerCount: 1, endsAt: '2026-08-25T09:00:00.000Z', createdAt: '2026-08-25T08:00:00.000Z',
+    });
+    const registered = await registerGiveawayEntry('giveaway-pg', 'user-a', {
+      storage, now: new Date('2026-08-25T08:30:00.000Z'),
+    });
+    assert.equal(registered.joined, true);
+    const announcements = [];
+    const channel = {
+      guildId: 'guild-a', isTextBased: () => true,
+      messages: { fetch: async () => ({ edit: async () => {} }) },
+      send: async (payload) => announcements.push(payload),
+    };
+    const client = { channels: { fetch: async () => channel } };
+    const result = await finalizeDueGiveaways(client, {
+      storage, now: new Date('2026-08-25T09:01:00.000Z'), randomIndex: () => 0,
+    });
+    assert.deepEqual(result[0].winners, ['user-a']);
+    assert.equal(announcements.length, 1);
+    assert.equal((await storage.getGiveaway('giveaway-pg')).status, 'ended');
+  } finally {
+    await database.close();
+  }
 });

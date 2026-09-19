@@ -2,10 +2,15 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
 const { getDataDirectory } = require('./dataDirectory');
+const { resolveRuntimeStore } = require('./runtimeStorage');
 
 const dataDirectory = getDataDirectory();
 const databaseFile = path.join(dataDirectory, 'warnings.json');
 let writeQueue = Promise.resolve();
+
+function activeStorage(storage) {
+  return resolveRuntimeStore('warnings', storage);
+}
 
 async function readDatabase() {
   try {
@@ -16,7 +21,9 @@ async function readDatabase() {
   }
 }
 
-async function addWarning({ guildId, userId, moderatorId, reason }) {
+async function addWarning({ guildId, userId, moderatorId, reason }, storage) {
+  const selected = activeStorage(storage);
+  if (selected) return selected.addWarning({ guildId, userId, moderatorId, reason });
   const operation = writeQueue.then(async () => {
     const database = await readDatabase();
     database[guildId] ??= {};
@@ -39,12 +46,16 @@ async function addWarning({ guildId, userId, moderatorId, reason }) {
   return operation;
 }
 
-async function getWarnings(guildId, userId) {
+async function getWarnings(guildId, userId, storage) {
+  const selected = activeStorage(storage);
+  if (selected) return selected.getWarnings(guildId, userId);
   const database = await readDatabase();
   return database[guildId]?.[userId] || [];
 }
 
-async function removeWarning(guildId, userId, warningId) {
+async function removeWarning(guildId, userId, warningId, storage) {
+  const selected = activeStorage(storage);
+  if (selected) return selected.removeWarning(guildId, userId, warningId);
   const operation = writeQueue.then(async () => {
     const database = await readDatabase();
     const warnings = database[guildId]?.[userId] || [];
@@ -59,7 +70,9 @@ async function removeWarning(guildId, userId, warningId) {
   return operation;
 }
 
-async function clearWarnings(guildId, userId) {
+async function clearWarnings(guildId, userId, storage) {
+  const selected = activeStorage(storage);
+  if (selected) return selected.clearWarnings(guildId, userId);
   const operation = writeQueue.then(async () => {
     const database = await readDatabase();
     const count = database[guildId]?.[userId]?.length || 0;
@@ -72,7 +85,9 @@ async function clearWarnings(guildId, userId) {
   return operation;
 }
 
-async function clearGuildWarnings(guildId) {
+async function clearGuildWarnings(guildId, storage) {
+  const selected = activeStorage(storage);
+  if (selected) return selected.clearGuildWarnings(guildId);
   const operation = writeQueue.then(async () => {
     const database = await readDatabase();
     const count = Object.values(database[guildId] || {})

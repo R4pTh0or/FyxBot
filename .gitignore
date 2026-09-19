@@ -17,3 +17,5 @@ coverage/
 data/*
 !data/.gitkeep
 data/backups/
+.wrangler/
+.safety/

@@ -1,5 +1,6 @@
 const { Events } = require('discord.js');
 const { handleVoiceStateUpdate } = require('../services/temporaryVoice');
+const logger = require('../services/logger').logger.child({ component: 'temporary-voice' });
 
 module.exports = {
   name: Events.VoiceStateUpdate,
@@ -7,7 +8,7 @@ module.exports = {
     try {
       await handleVoiceStateUpdate(oldState, newState);
     } catch (error) {
-      console.error(`[FyxBot] Erreur de salon vocal temporaire (${newState.guild.id}) :`, error);
+      logger.error({ err: error, guildId: newState.guild.id }, '[FyxBot] Erreur de salon vocal temporaire.');
     }
   },
 };

@@ -1,5 +1,5 @@
 const { createHash, randomBytes, timingSafeEqual } = require('node:crypto');
-const { database } = require('../database/database');
+const { createSqliteDashboardAuthStore } = require('../database/sqliteDashboardAuthStore');
 
 const defaultSessionHours = 24;
 const SESSION_COOKIE = 'fyxbot_session';
@@ -47,7 +47,13 @@ function cookie(value, maxAge, name = sessionCookieName()) {
 
 function parseCookie(request, name) {
   const entry = String(request.headers.cookie || '').split(';').map((item) => item.trim()).find((item) => item.startsWith(`${name}=`));
-  return entry ? decodeURIComponent(entry.slice(name.length + 1)) : null;
+  if (!entry) return null;
+  try {
+    return decodeURIComponent(entry.slice(name.length + 1));
+  } catch {
+    // Un cookie volontairement malformé ne doit jamais faire échouer toute l'API.
+    return null;
+  }
 }
 
 function hash(value) {
@@ -70,72 +76,66 @@ function readFirstCookie(request, names) {
   return null;
 }
 
-function purgeExpiredDashboardAuth(targetDatabase = database, now = Date.now()) {
-  const sessions = targetDatabase.prepare('DELETE FROM dashboard_sessions WHERE expires_at <= ?').run(now).changes;
-  const oauthStates = targetDatabase.prepare('DELETE FROM dashboard_oauth_states WHERE expires_at <= ?').run(now).changes;
-  return { oauthStates, sessions };
+let defaultStore;
+function resolveStore(store) {
+  if (store) return store;
+  const runtimeStore = require('../database/runtimeStorage').resolveRuntimeStore('dashboardAuth');
+  if (runtimeStore) return runtimeStore;
+  defaultStore ||= createSqliteDashboardAuthStore(require('../database/database').database);
+  return defaultStore;
 }
 
-function startDashboardAuthCleanup({ targetDatabase = database, intervalMs = 15 * 60 * 1000 } = {}) {
-  purgeExpiredDashboardAuth(targetDatabase);
-  const timer = setInterval(() => purgeExpiredDashboardAuth(targetDatabase), intervalMs);
+function purgeExpiredDashboardAuth(targetDatabase, now = Date.now()) {
+  return createSqliteDashboardAuthStore(targetDatabase || require('../database/database').database)
+    .purgeExpiredDashboardAuth(now);
+}
+
+function startDashboardAuthCleanup({ store, intervalMs = 15 * 60 * 1000 } = {}) {
+  const authStore = resolveStore(store);
+  const purge = () => Promise.resolve(authStore.purgeExpiredDashboardAuth()).catch((error) => {
+    require('./logger').logger.error({ err: error }, '[FyxBot] Purge des sessions impossible.');
+  });
+  void purge();
+  const timer = setInterval(purge, intervalMs);
   timer.unref();
   return { stop: () => clearInterval(timer) };
 }
 
-function getSession(request) {
+async function getSession(request, store) {
+  const authStore = resolveStore(store);
   const now = Date.now();
-  purgeExpiredDashboardAuth(database, now);
+  await authStore.purgeExpiredDashboardAuth(now);
   for (const name of [HOST_SESSION_COOKIE, SESSION_COOKIE, LEGACY_SESSION_COOKIE]) {
     const token = parseCookie(request, name);
     if (!token) continue;
     const tokenHash = hash(token);
-    const row = database.prepare('SELECT value, expires_at FROM dashboard_sessions WHERE token_hash = ?').get(tokenHash);
-    if (!row || row.expires_at < now) {
-      if (row) database.prepare('DELETE FROM dashboard_sessions WHERE token_hash = ?').run(tokenHash);
-      continue;
+    const session = await authStore.getSession(tokenHash, now);
+    if (!session) continue;
+    if (!session.csrfToken) {
+      session.csrfToken = randomBytes(32).toString('hex');
+      await authStore.updateSession(tokenHash, session);
     }
-    try {
-      const session = JSON.parse(row.value);
-      if (!session.csrfToken) {
-        session.csrfToken = randomBytes(32).toString('hex');
-        database.prepare('UPDATE dashboard_sessions SET value = ? WHERE token_hash = ?').run(JSON.stringify(session), tokenHash);
-      }
-      return session;
-    } catch {
-      database.prepare('DELETE FROM dashboard_sessions WHERE token_hash = ?').run(tokenHash);
-    }
+    return session;
   }
   return null;
 }
 
-function storeOAuthState(state, expiresAt) {
-  purgeExpiredDashboardAuth(database);
-  database.prepare('INSERT INTO dashboard_oauth_states (state_hash, expires_at) VALUES (?, ?)').run(hash(state), expiresAt);
+async function storeOAuthState(state, expiresAt, store) {
+  const authStore = resolveStore(store);
+  await authStore.purgeExpiredDashboardAuth();
+  await authStore.storeOAuthState(hash(state), expiresAt);
 }
 
-function consumeOAuthState(state) {
+async function consumeOAuthState(state, store) {
   if (!state) return false;
-  const stateHash = hash(state);
-  const now = Date.now();
-  database.exec('BEGIN IMMEDIATE');
-  try {
-    const row = database.prepare('SELECT expires_at FROM dashboard_oauth_states WHERE state_hash = ?').get(stateHash);
-    database.prepare('DELETE FROM dashboard_oauth_states WHERE state_hash = ?').run(stateHash);
-    database.prepare('DELETE FROM dashboard_oauth_states WHERE expires_at < ?').run(now);
-    database.exec('COMMIT');
-    return Boolean(row && row.expires_at >= now);
-  } catch (error) {
-    try { database.exec('ROLLBACK'); } catch { /* La transaction a pu être annulée automatiquement. */ }
-    throw error;
-  }
+  return resolveStore(store).consumeOAuthState(hash(state), Date.now());
 }
 
-function startLogin(response) {
+async function startLogin(response, store) {
   const config = settings();
   if (!config.enabled) throw new Error('La connexion Discord n’est pas configurée.');
   const state = randomBytes(24).toString('hex');
-  storeOAuthState(state, Date.now() + 10 * 60 * 1000);
+  await storeOAuthState(state, Date.now() + 10 * 60 * 1000, store);
   const url = new URL('https://discord.com/oauth2/authorize');
   url.searchParams.set('client_id', config.clientId);
   url.searchParams.set('redirect_uri', config.callbackUrl);
@@ -157,13 +157,13 @@ function startLogin(response) {
   response.end();
 }
 
-async function finishLogin(request, url, response) {
+async function finishLogin(request, url, response, store) {
   const config = settings();
   if (!config.enabled) throw new Error('La connexion Discord n’est pas configurée.');
   const state = url.searchParams.get('state');
   const code = url.searchParams.get('code');
   const browserState = readFirstCookie(request, [HOST_OAUTH_STATE_COOKIE, OAUTH_STATE_COOKIE]);
-  if (!state || !code || !safeEqual(state, browserState) || !consumeOAuthState(state)) {
+  if (!state || !code || !safeEqual(state, browserState) || !await consumeOAuthState(state, store)) {
     throw new Error('Connexion Discord expirée ou invalide.');
   }
   const tokenResponse = await fetch('https://discord.com/api/v10/oauth2/token', {
@@ -184,7 +184,7 @@ async function finishLogin(request, url, response) {
     authenticatedAt: Date.now(),
     csrfToken: randomBytes(32).toString('hex'),
   };
-  database.prepare('INSERT INTO dashboard_sessions (token_hash, value, expires_at) VALUES (?, ?, ?)').run(hash(sessionToken), JSON.stringify(session), Date.now() + config.sessionLifetime);
+  await resolveStore(store).createSession(hash(sessionToken), session, Date.now() + config.sessionLifetime);
   const activeSessionCookie = sessionCookieName();
   response.writeHead(302, {
     Location: config.panelUrl,
@@ -207,10 +207,10 @@ function csrfTokenMatches(request, session) {
   return typeof provided === 'string' && safeEqual(provided, session?.csrfToken);
 }
 
-function logout(request, response, origin) {
+async function logout(request, response, origin, store) {
   for (const name of [HOST_SESSION_COOKIE, SESSION_COOKIE, LEGACY_SESSION_COOKIE]) {
     const token = parseCookie(request, name);
-    if (token) database.prepare('DELETE FROM dashboard_sessions WHERE token_hash = ?').run(hash(token));
+    if (token) await resolveStore(store).deleteSession(hash(token));
   }
   response.writeHead(200, {
     'Content-Type': 'application/json',

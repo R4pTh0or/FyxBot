@@ -6,6 +6,7 @@ const {
   MessageFlags,
 } = require('discord.js');
 const { getRulesConfig, setRulesConfig } = require('../database/rulesStore');
+const { assignableRoleIssue, assignableRoleMessage } = require('./safeAssignableRoles');
 
 const ACCEPT_RULES_BUTTON_ID = 'rules:accept';
 
@@ -87,8 +88,13 @@ async function handleRulesButton(interaction) {
     return true;
   }
   const role = await interaction.guild.roles.fetch(config.verifiedRoleId).catch(() => null);
-  if (!role || role.managed || interaction.guild.members.me.roles.highest.comparePositionTo(role) <= 0) {
-    await interaction.reply({ content: 'FyxBot ne peut pas attribuer le rôle de validation. Prévenez un administrateur.', flags: MessageFlags.Ephemeral });
+  const roleIssue = assignableRoleIssue(interaction.guild, role, { actorIsOwner: true });
+  if (roleIssue) {
+    await interaction.reply({ content: `${assignableRoleMessage(roleIssue, role)} Prévenez un administrateur.`, flags: MessageFlags.Ephemeral });
+    return true;
+  }
+  if (interaction.message.id !== config.messageId || interaction.channelId !== config.channelId) {
+    await interaction.reply({ content: 'Ce bouton ne correspond plus au règlement FyxBot actif.', flags: MessageFlags.Ephemeral });
     return true;
   }
   if (interaction.member.roles.cache.has(role.id)) {

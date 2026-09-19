@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true });
 
 const { Client, GatewayIntentBits, PermissionsBitField } = require('discord.js');
 const { getConfig } = require('../src/config');
@@ -75,7 +75,7 @@ async function main() {
       }, null, 2));
       return;
     }
-    const blueprint = getServerSetupBlueprint(fullGuild.id);
+    const blueprint = await getServerSetupBlueprint(fullGuild.id);
     if (!blueprint) throw new Error('Aucune proposition personnalisée. Utilisez d’abord /setup concevoir sur Discord ou la zone de description du panel.');
     const desired = runtimeBlueprint(blueprint);
     const before = await analyzeServerStructure(fullGuild, {}, blueprint);

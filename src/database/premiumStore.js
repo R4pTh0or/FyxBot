@@ -1,11 +1,11 @@
-const { getConfiguration, setConfiguration } = require('./database');
+const defaultStorage = require('./defaultConfigurationStorage');
 
-function getPremiumConfig(guildId) {
-  return getConfiguration(guildId, 'premium');
+function getPremiumConfig(guildId, storage = defaultStorage) {
+  return storage.getConfiguration(guildId, 'premium');
 }
 
-function setPremiumConfig(guildId, config) {
-  return setConfiguration(guildId, 'premium', config);
+function setPremiumConfig(guildId, config, storage = defaultStorage) {
+  return storage.setConfiguration(guildId, 'premium', config);
 }
 
 module.exports = { getPremiumConfig, setPremiumConfig };

@@ -1,11 +1,11 @@
-const { getConfiguration, setConfiguration } = require('./database');
+const defaultStorage = require('./defaultConfigurationStorage');
 
-function getRulesConfig(guildId) {
-  return getConfiguration(guildId, 'rules');
+async function getRulesConfig(guildId, storage = defaultStorage) {
+  return storage.getConfiguration(guildId, 'rules');
 }
 
-function setRulesConfig(guildId, config) {
-  return setConfiguration(guildId, 'rules', config);
+async function setRulesConfig(guildId, config, storage = defaultStorage) {
+  return storage.setConfiguration(guildId, 'rules', config);
 }
 
 module.exports = { getRulesConfig, setRulesConfig };

@@ -42,6 +42,28 @@ test("affiche le Control Center FyxBot côté serveur", async () => {
   assert.doesNotMatch(html, /DISCORD_TOKEN|DISCORD_CLIENT_SECRET|BACKUP_SECRET|PRIVATE KEY/i);
 });
 
+test("publie le Control Center V2 comme interface principale", async () => {
+  const [response, v1Page, v2Page, dashboard, css] = await Promise.all([
+    render("/v2"),
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/v2/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/Dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /<title>FyxBot Control Center V2<\/title>/i);
+  assert.match(html, /name="robots" content="noindex, follow"/i);
+  assert.match(v1Page, /<Dashboard variant="v2"\s*\/>/);
+  assert.match(v2Page, /<Dashboard variant="v2"\s*\/>/);
+  assert.match(dashboard, /Centre de pilotage FyxBot V2/);
+  assert.match(dashboard, /data\.onboarding\.percent/);
+  assert.match(dashboard, /data\.recentLogs\.slice\(0, 3\)/);
+  assert.match(css, /data-dashboard-version="v2"/);
+  assert.match(css, /V2 · CONTROL CENTER/);
+});
+
 test("publie les informations légales et la procédure de signalement à jour", async () => {
   const [terms, privacy, support, changelog] = await Promise.all([
     render("/conditions-utilisation"),
@@ -110,9 +132,34 @@ test("conserve les protections essentielles du panel", async () => {
   assert.match(dashboard, /mobile-navigation/);
   assert.match(dashboard, /Tous les modules/);
   assert.match(dashboard, /mobilePrimaryNavigation/);
+  assert.match(dashboard, /items: \["Vue d’ensemble", "Pilotage"\]/);
+  assert.match(dashboard, /function PilotageDashboard/);
+  assert.match(dashboard, /Parcours guidé/);
+  assert.match(dashboard, /Structure et permissions/);
+  assert.match(dashboard, /Historique/);
+  assert.match(dashboard, /item !== "Créateur" \|\| data\?\.creatorAccess/);
+  assert.match(dashboard, /visibleNavigationGroups\.map/);
+  assert.match(dashboard, /className="fyxstream-entry"/);
+  assert.match(dashboard, /className=\{`mobile-fyxstream-card/);
+  assert.match(dashboard, /FYXBOT_INTERFACE_MODE_KEY/);
+  assert.match(dashboard, /FYXBOT_FAVORITES_KEY/);
+  assert.match(dashboard, /event\.key\.toLowerCase\(\) === "k"/);
+  assert.match(dashboard, /Rechercher dans FyxBot/);
+  assert.match(dashboard, /Centre d’alertes/);
+  assert.match(dashboard, /interfaceMode === "simple"/);
+  assert.match(dashboard, /visibleFavorites\.map/);
+  assert.match(dashboard, /panelAlerts\.map/);
+  assert.match(css, /\.panel-search-dialog/);
+  assert.match(css, /\.panel-alert-popover/);
+  assert.match(css, /\.panel-favorites/);
   assert.match(dashboard, /RÈGLEMENT INTERACTIF/);
   assert.match(dashboard, /SALONS VOCAUX TEMPORAIRES/);
   assert.match(dashboard, /CONSTRUCTEUR DE MESSAGES/);
+  assert.match(dashboard, /MESSAGES PUBLIÉS/);
+  assert.match(dashboard, /Retrouver et modifier une publication/);
+  assert.match(dashboard, /messagePublicationId/);
+  assert.match(dashboard, /publicationId: form\.messagePublicationId/);
+  assert.doesNotMatch(dashboard, /<option value="changelog">/);
   assert.match(dashboard, /Archives réouvrables/);
   assert.match(dashboard, /APERÇU DISCORD/);
   assert.match(dashboard, /PARCOURS GUIDÉ/);
@@ -169,4 +216,48 @@ test("conserve les protections essentielles du panel", async () => {
   assert.equal(release.currentVersion, "1.5.0");
   assert.equal(release.status, "available");
   assert.deepEqual(JSON.parse(releasePublic), release);
+});
+
+test("intègre le chat Twitch au rendu et à la navigation FyxBot", async () => {
+  const [dashboard, streaming, css] = await Promise.all([
+    readFile(new URL("../app/Dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/StreamingDashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(dashboard, /StreamingDashboard/);
+  assert.match(dashboard, /active === "FyxStream"/);
+  assert.match(dashboard, /FyxStream: "🟣"/);
+  assert.match(dashboard, /ESPACE STREAMING/);
+  assert.match(streaming, /STREAMING FYXBOT/);
+  assert.match(streaming, /Animez votre chat\. Gardez le contrôle\./);
+  assert.match(streaming, /\/twitch\/status/);
+  assert.match(streaming, /\/twitch\/auth\/start/);
+  assert.match(streaming, /\/twitch\/disconnect/);
+  assert.match(streaming, /\/twitch\/chat\/config/);
+  assert.match(streaming, /\/twitch\/commands/);
+  assert.match(streaming, /confirmation: "SUPPRIMER"/);
+  assert.match(streaming, /confirmation: "DECONNECTER"/);
+  assert.match(streaming, /AUCUNE CHAÎNE RELIÉE/);
+  assert.match(streaming, /Aucune commande personnalisée/);
+  assert.match(streaming, /Impossible de charger Twitch/);
+  assert.match(streaming, /role="tablist"/);
+  assert.match(streaming, /role="status"/);
+  assert.match(streaming, /role="alert"/);
+  assert.match(streaming, /role="switch"/);
+  assert.match(streaming, /aria-checked=\{twitch\.chatEnabled\}/);
+  assert.match(streaming, /role="alertdialog"/);
+  assert.match(streaming, /aria-modal="true"/);
+  assert.match(streaming, /Confirmer la suppression/);
+  assert.match(streaming, /StreamElements/);
+  assert.match(streaming, /Indicateurs FyxStream/);
+  assert.match(streaming, /Commandes Twitch prêtes à l’emploi/);
+  assert.match(streaming, /!timeout @pseudo \[secondes\] \[raison\]/);
+  assert.match(streaming, /Autoriser la modération/);
+  assert.match(streaming, /enabledCommandCount/);
+  assert.match(streaming, /totalCommandUses/);
+  assert.match(streaming, /activeProtectionCount/);
+  assert.match(css, /\.streaming-insights/);
+  assert.match(css, /\.streaming-workspace/);
+  assert.match(css, /prefers-reduced-motion:reduce/);
 });

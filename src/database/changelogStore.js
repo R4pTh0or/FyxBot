@@ -1,11 +1,11 @@
-const { getConfiguration, setConfiguration } = require('./database');
+const defaultStorage = require('./defaultConfigurationStorage');
 
-function getChangelogConfig(guildId) {
-  return getConfiguration(guildId, 'changelog');
+async function getChangelogConfig(guildId, storage = defaultStorage) {
+  return storage.getConfiguration(guildId, 'changelog');
 }
 
-function setChangelogConfig(guildId, config) {
-  return setConfiguration(guildId, 'changelog', config);
+async function setChangelogConfig(guildId, config, storage = defaultStorage) {
+  return storage.setConfiguration(guildId, 'changelog', config);
 }
 
 module.exports = { getChangelogConfig, setChangelogConfig };

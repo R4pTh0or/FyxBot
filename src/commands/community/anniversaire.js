@@ -12,6 +12,7 @@ const {
   isValidBirthday,
   zonedDateParts,
 } = require('../../services/birthdays');
+const { assignableRoleIssue, assignableRoleMessage } = require('../../services/safeAssignableRoles');
 
 const MONTH_NAMES = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin', 'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
 
@@ -85,8 +86,12 @@ module.exports = {
     }
     const channel = interaction.options.getChannel('salon', true);
     const role = interaction.options.getRole('role');
-    if (role && (role.managed || interaction.guild.members.me.roles.highest.comparePositionTo(role) <= 0)) {
-      return interaction.reply({ content: `FyxBot ne peut pas attribuer ${role}. Placez son rôle plus haut.`, flags: MessageFlags.Ephemeral });
+    const roleIssue = role ? assignableRoleIssue(interaction.guild, role, {
+      actorMember: interaction.member,
+      actorIsOwner: interaction.guild.ownerId === interaction.user.id,
+    }) : null;
+    if (roleIssue) {
+      return interaction.reply({ content: assignableRoleMessage(roleIssue, role), flags: MessageFlags.Ephemeral });
     }
     await setBirthdayConfig(interaction.guildId, {
       ...current,

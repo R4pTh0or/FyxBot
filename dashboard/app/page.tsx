@@ -1,7 +1,7 @@
 import Dashboard from "./Dashboard";
 
-export const dynamic = "force-static";
+export const revalidate = 30;
 
 export default function Home() {
-  return <Dashboard />;
+  return <Dashboard variant="v2" />;
 }

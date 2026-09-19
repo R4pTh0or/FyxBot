@@ -1,6 +1,8 @@
 const { EmbedBuilder } = require('discord.js');
 const { getBirthdayConfig, setBirthdayConfig } = require('../database/birthdayStore');
 const { DEFAULT_BIRTHDAY_MESSAGE, configuredMessage } = require('./defaultMessages');
+const logger = require('./logger').logger.child({ component: 'birthdays' });
+const { isSafeAssignableRole } = require('./safeAssignableRoles');
 
 const SUPPORTED_TIMEZONES = Object.freeze([
   'Europe/Paris',
@@ -54,7 +56,7 @@ async function announceBirthdaysForGuild(guild, now = new Date()) {
   const channel = await guild.channels.fetch(config.channelId).catch(() => null);
   const role = config.roleId ? await guild.roles.fetch(config.roleId).catch(() => null) : null;
 
-  if (role && !role.managed && guild.members.me.roles.highest.comparePositionTo(role) > 0) {
+  if (isSafeAssignableRole(guild, role, { actorIsOwner: true })) {
     const birthdayIds = new Set(members.map((member) => member.id));
     await Promise.all([...role.members.values()].filter((member) => !birthdayIds.has(member.id))
       .map((member) => member.roles.remove(role, 'Fin du rôle anniversaire FyxBot').catch(() => null)));
@@ -82,7 +84,7 @@ async function checkBirthdays(client, now = new Date()) {
     try {
       results.push(await announceBirthdaysForGuild(guild, now));
     } catch (error) {
-      console.error(`[FyxBot] Erreur anniversaire sur ${guild.id} :`, error);
+      logger.error({ err: error, guildId: guild.id }, '[FyxBot] Erreur pendant l’annonce d’un anniversaire.');
     }
   }
   return results;

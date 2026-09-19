@@ -1,6 +1,7 @@
 const { MessageFlags } = require('discord.js');
 const { logAction } = require('./logs');
 const { getRolePanelConfig } = require('../database/rolePanelStore');
+const { assignableRoleIssue, assignableRoleMessage } = require('./safeAssignableRoles');
 
 const ROLE_BUTTON_PREFIX = 'role:toggle:';
 
@@ -29,9 +30,10 @@ async function handleRoleButton(interaction) {
     await interaction.reply({ content: 'Ce rôle n’existe plus.', flags: MessageFlags.Ephemeral });
     return true;
   }
-  if (role.managed || interaction.guild.members.me.roles.highest.comparePositionTo(role) <= 0) {
+  const roleIssue = assignableRoleIssue(interaction.guild, role, { actorIsOwner: true });
+  if (roleIssue) {
     await interaction.reply({
-      content: 'FyxBot ne peut pas gérer ce rôle. Placez le rôle FyxBot au-dessus dans la hiérarchie.',
+      content: assignableRoleMessage(roleIssue, role),
       flags: MessageFlags.Ephemeral,
     });
     return true;

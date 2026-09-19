@@ -1,11 +1,11 @@
-const { getConfiguration, setConfiguration } = require('./database');
+const defaultStorage = require('./defaultConfigurationStorage');
 
-function getSocialConfig(guildId) {
-  return getConfiguration(guildId, 'social');
+async function getSocialConfig(guildId, storage = defaultStorage) {
+  return storage.getConfiguration(guildId, 'social');
 }
 
-function setSocialConfig(guildId, config) {
-  return setConfiguration(guildId, 'social', config);
+async function setSocialConfig(guildId, config, storage = defaultStorage) {
+  return storage.setConfiguration(guildId, 'social', config);
 }
 
 module.exports = { getSocialConfig, setSocialConfig };

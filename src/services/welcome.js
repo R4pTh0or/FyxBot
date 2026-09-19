@@ -6,6 +6,8 @@ const {
   DEFAULT_WELCOME_MESSAGE,
   configuredMessage,
 } = require('./defaultMessages');
+const logger = require('./logger').logger.child({ component: 'welcome' });
+const { isSafeAssignableRole } = require('./safeAssignableRoles');
 
 function renderTemplate(template, member, fallback = DEFAULT_WELCOME_MESSAGE) {
   return configuredMessage(template, fallback)
@@ -18,8 +20,10 @@ async function handleMemberAdd(member) {
   const config = await getWelcomeConfig(member.guild.id);
   if (config?.autoRoleId) {
     const role = await member.guild.roles.fetch(config.autoRoleId).catch(() => null);
-    if (role && !role.managed && member.guild.members.me.roles.highest.comparePositionTo(role) > 0) {
-      await member.roles.add(role, 'Rôle automatique FyxBot').catch(console.error);
+    if (isSafeAssignableRole(member.guild, role, { actorIsOwner: true })) {
+      await member.roles.add(role, 'Rôle automatique FyxBot').catch((error) => {
+        logger.error({ err: error, guildId: member.guild.id, memberId: member.id, roleId: role.id }, '[FyxBot] Attribution du rôle automatique impossible.');
+      });
     }
   }
 
@@ -33,7 +37,9 @@ async function handleMemberAdd(member) {
         .setThumbnail(member.user.displayAvatarURL({ size: 512 }))
         .setFooter({ text: 'FyxBot • Bienvenue' })
         .setTimestamp();
-      await channel.send({ embeds: [embed] }).catch(console.error);
+      await channel.send({ embeds: [embed] }).catch((error) => {
+        logger.error({ err: error, channelId: channel.id, guildId: member.guild.id }, '[FyxBot] Message de bienvenue impossible.');
+      });
     }
   }
 
@@ -56,7 +62,9 @@ async function handleMemberRemove(member) {
         .setThumbnail(member.user.displayAvatarURL({ size: 512 }))
         .setFooter({ text: 'FyxBot • Départ' })
         .setTimestamp();
-      await channel.send({ embeds: [embed] }).catch(console.error);
+      await channel.send({ embeds: [embed] }).catch((error) => {
+        logger.error({ err: error, channelId: channel.id, guildId: member.guild.id }, '[FyxBot] Message de départ impossible.');
+      });
     }
   }
 

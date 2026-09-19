@@ -1,6 +1,7 @@
 const { AttachmentBuilder, EmbedBuilder } = require('discord.js');
 const { getLogConfig } = require('../database/logStore');
 const { addAuditLog } = require('../database/auditLogStore');
+const logger = require('./logger').logger.child({ component: 'discord-logs' });
 
 async function getLogChannel(guild) {
   const config = await getLogConfig(guild.id);
@@ -10,7 +11,7 @@ async function getLogChannel(guild) {
 }
 
 async function logAction(guild, { title, description, color = 0xf97316, fields = [] }) {
-  addAuditLog(guild.id, { title, description, color });
+  await addAuditLog(guild.id, { title, description, color });
   const channel = await getLogChannel(guild);
   if (!channel) return false;
   const embed = new EmbedBuilder()
@@ -20,7 +21,9 @@ async function logAction(guild, { title, description, color = 0xf97316, fields =
     .addFields(fields)
     .setFooter({ text: 'FyxBot • Journal du serveur' })
     .setTimestamp();
-  await channel.send({ embeds: [embed] }).catch(console.error);
+  await channel.send({ embeds: [embed] }).catch((error) => {
+    logger.error({ err: error, channelId: channel.id, guildId: guild.id }, '[FyxBot] Envoi du journal Discord impossible.');
+  });
   return true;
 }
 

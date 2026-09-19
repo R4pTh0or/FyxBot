@@ -7,6 +7,8 @@ const {
   MessageFlags,
   PermissionFlagsBits,
 } = require('discord.js');
+const logger = require('./logger').logger.child({ component: 'giveaways' });
+const { resolveRuntimeStore } = require('../database/runtimeStorage');
 
 const GIVEAWAY_BUTTON_PREFIX = 'giveaway:join:';
 
@@ -50,7 +52,8 @@ function giveawayPayload(giveaway, { participantCount = 0, winners = [], ended =
   return { embeds: [embed], components: [new ActionRowBuilder().addComponents(button)] };
 }
 
-async function createCommunityGiveaway(guild, channel, input, { targetDatabase, now = new Date() } = {}) {
+async function createCommunityGiveaway(guild, channel, input, { targetDatabase, storage, now = new Date() } = {}) {
+  storage = resolveRuntimeStore('giveaways', storage);
   if (!channel?.isTextBased() || channel.guildId !== guild.id) throw new Error('Choisissez un salon textuel de ce serveur.');
   const botMember = guild.members.me;
   if (!channel.permissionsFor(botMember)?.has([
@@ -72,13 +75,17 @@ async function createCommunityGiveaway(guild, channel, input, { targetDatabase, 
   };
   const message = await channel.send(giveawayPayload(giveaway));
   giveaway.messageId = message.id;
-  const activeDatabase = targetDatabase || defaultDatabase();
   try {
-    activeDatabase.prepare(`INSERT INTO community_giveaways
-      (giveaway_id, guild_id, channel_id, message_id, prize, winner_count, ends_at, status, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`)
-      .run(giveaway.giveawayId, giveaway.guildId, giveaway.channelId, giveaway.messageId,
-        giveaway.prize, giveaway.winnerCount, giveaway.endsAt, giveaway.createdAt);
+    if (storage) {
+      await storage.createGiveaway(giveaway);
+    } else {
+      const activeDatabase = targetDatabase || defaultDatabase();
+      activeDatabase.prepare(`INSERT INTO community_giveaways
+        (giveaway_id, guild_id, channel_id, message_id, prize, winner_count, ends_at, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?)`)
+        .run(giveaway.giveawayId, giveaway.guildId, giveaway.channelId, giveaway.messageId,
+          giveaway.prize, giveaway.winnerCount, giveaway.endsAt, giveaway.createdAt);
+    }
   } catch (error) {
     await message.delete().catch(() => null);
     throw error;
@@ -86,13 +93,17 @@ async function createCommunityGiveaway(guild, channel, input, { targetDatabase, 
   return { giveaway, message };
 }
 
-function getGiveaway(giveawayId, { targetDatabase } = {}) {
+async function getGiveaway(giveawayId, { targetDatabase, storage } = {}) {
+  storage = resolveRuntimeStore('giveaways', storage);
+  if (storage) return storage.getGiveaway(giveawayId);
   const activeDatabase = targetDatabase || defaultDatabase();
   const row = activeDatabase.prepare('SELECT * FROM community_giveaways WHERE giveaway_id = ?').get(giveawayId);
   return row ? mapGiveaway(row, activeDatabase) : null;
 }
 
-function listGuildGiveaways(guildId, { targetDatabase, limit = 20 } = {}) {
+async function listGuildGiveaways(guildId, { targetDatabase, storage, limit = 20 } = {}) {
+  storage = resolveRuntimeStore('giveaways', storage);
+  if (storage) return storage.listGuildGiveaways(guildId, limit);
   const activeDatabase = targetDatabase || defaultDatabase();
   return activeDatabase.prepare(`SELECT g.*, COUNT(e.user_id) AS participant_count
     FROM community_giveaways g
@@ -121,9 +132,11 @@ function mapGiveaway(row, activeDatabase = null) {
   };
 }
 
-function registerGiveawayEntry(giveawayId, userId, { targetDatabase, now = new Date() } = {}) {
+async function registerGiveawayEntry(giveawayId, userId, { targetDatabase, storage, now = new Date() } = {}) {
+  storage = resolveRuntimeStore('giveaways', storage);
+  if (storage) return storage.registerGiveawayEntry(giveawayId, userId, { now });
   const activeDatabase = targetDatabase || defaultDatabase();
-  const giveaway = getGiveaway(giveawayId, { targetDatabase: activeDatabase });
+  const giveaway = await getGiveaway(giveawayId, { targetDatabase: activeDatabase });
   if (!giveaway || giveaway.status !== 'active') throw new Error('Ce concours n’est plus ouvert.');
   if (new Date(giveaway.endsAt).getTime() <= new Date(now).getTime()) throw new Error('Le tirage de ce concours est en cours.');
   const result = activeDatabase.prepare(`INSERT OR IGNORE INTO community_giveaway_entries
@@ -137,13 +150,13 @@ function registerGiveawayEntry(giveawayId, userId, { targetDatabase, now = new D
 async function handleGiveawayButton(interaction, options = {}) {
   const giveawayId = interaction.customId.slice(GIVEAWAY_BUTTON_PREFIX.length);
   if (!giveawayId || interaction.user.bot) return interaction.reply({ content: 'Participation impossible.', flags: MessageFlags.Ephemeral });
-  const giveaway = getGiveaway(giveawayId, options);
+  const giveaway = await getGiveaway(giveawayId, options);
   if (!giveaway || giveaway.guildId !== interaction.guildId || giveaway.channelId !== interaction.channelId
     || giveaway.messageId !== interaction.message.id) {
     return interaction.reply({ content: 'Ce concours est introuvable ou n’appartient pas à ce message.', flags: MessageFlags.Ephemeral });
   }
   try {
-    const result = registerGiveawayEntry(giveawayId, interaction.user.id, options);
+    const result = await registerGiveawayEntry(giveawayId, interaction.user.id, options);
     return interaction.reply({
       content: result.joined
         ? `🎟️ Participation enregistrée ! Vous êtes ${result.participantCount} participant(s).`
@@ -164,13 +177,17 @@ function selectWinners(userIds, winnerCount, randomIndex = (maximum) => randomIn
   return winners;
 }
 
-async function finalizeGiveaway(client, row, { targetDatabase, now = new Date(), randomIndex } = {}) {
-  const activeDatabase = targetDatabase || defaultDatabase();
-  const claimed = activeDatabase.prepare("UPDATE community_giveaways SET status = 'drawing' WHERE giveaway_id = ? AND status = 'active'")
-    .run(row.giveaway_id).changes === 1;
+async function finalizeGiveaway(client, row, { targetDatabase, storage, now = new Date(), randomIndex } = {}) {
+  storage = resolveRuntimeStore('giveaways', storage);
+  const activeDatabase = storage ? null : targetDatabase || defaultDatabase();
+  const claim = storage ? await storage.claimGiveaway(row.giveaway_id) : null;
+  const claimed = storage ? Boolean(claim) : activeDatabase.prepare(
+    "UPDATE community_giveaways SET status = 'drawing' WHERE giveaway_id = ? AND status = 'active'",
+  ).run(row.giveaway_id).changes === 1;
   if (!claimed) return { skipped: true, giveawayId: row.giveaway_id };
-  const entries = activeDatabase.prepare('SELECT user_id FROM community_giveaway_entries WHERE giveaway_id = ? ORDER BY joined_at')
-    .all(row.giveaway_id).map((entry) => entry.user_id);
+  const entries = storage ? claim.userIds : activeDatabase.prepare(
+    'SELECT user_id FROM community_giveaway_entries WHERE giveaway_id = ? ORDER BY joined_at',
+  ).all(row.giveaway_id).map((entry) => entry.user_id);
   const winners = selectWinners(entries, row.winner_count, randomIndex);
   const giveaway = mapGiveaway({ ...row, status: 'drawing', participant_count: entries.length });
   try {
@@ -185,55 +202,65 @@ async function finalizeGiveaway(client, row, { targetDatabase, now = new Date(),
         allowedMentions: { users: winners },
       });
     }
-    activeDatabase.exec('BEGIN IMMEDIATE');
-    try {
-      activeDatabase.prepare('DELETE FROM community_giveaway_entries WHERE giveaway_id = ?').run(row.giveaway_id);
-      activeDatabase.prepare("UPDATE community_giveaways SET status = 'ended', ended_at = ? WHERE giveaway_id = ?")
-        .run(new Date(now).toISOString(), row.giveaway_id);
-      activeDatabase.exec('COMMIT');
-    } catch (error) {
-      activeDatabase.exec('ROLLBACK');
-      throw error;
+    if (storage) {
+      await storage.completeGiveaway(row.giveaway_id, { now });
+    } else {
+      activeDatabase.exec('BEGIN IMMEDIATE');
+      try {
+        activeDatabase.prepare('DELETE FROM community_giveaway_entries WHERE giveaway_id = ?').run(row.giveaway_id);
+        activeDatabase.prepare("UPDATE community_giveaways SET status = 'ended', ended_at = ? WHERE giveaway_id = ?")
+          .run(new Date(now).toISOString(), row.giveaway_id);
+        activeDatabase.exec('COMMIT');
+      } catch (error) {
+        activeDatabase.exec('ROLLBACK');
+        throw error;
+      }
     }
     return { giveawayId: row.giveaway_id, winners, participants: entries.length };
   } catch (error) {
-    activeDatabase.prepare("UPDATE community_giveaways SET status = 'active' WHERE giveaway_id = ? AND status = 'drawing'")
+    if (storage) await storage.resetDrawing(row.giveaway_id);
+    else activeDatabase.prepare("UPDATE community_giveaways SET status = 'active' WHERE giveaway_id = ? AND status = 'drawing'")
       .run(row.giveaway_id);
     throw error;
   }
 }
 
-async function finalizeDueGiveaways(client, { targetDatabase, now = new Date(), randomIndex } = {}) {
-  const activeDatabase = targetDatabase || defaultDatabase();
-  const rows = activeDatabase.prepare("SELECT * FROM community_giveaways WHERE status = 'active' AND ends_at <= ? ORDER BY ends_at LIMIT 25")
-    .all(new Date(now).toISOString());
+async function finalizeDueGiveaways(client, { targetDatabase, storage, now = new Date(), randomIndex } = {}) {
+  storage = resolveRuntimeStore('giveaways', storage);
+  const activeDatabase = storage ? null : targetDatabase || defaultDatabase();
+  const rows = storage ? await storage.listDueGiveaways({ now }) : activeDatabase.prepare(
+    "SELECT * FROM community_giveaways WHERE status = 'active' AND ends_at <= ? ORDER BY ends_at LIMIT 25",
+  ).all(new Date(now).toISOString());
   const results = [];
   for (const row of rows) {
     try {
-      results.push(await finalizeGiveaway(client, row, { targetDatabase: activeDatabase, now, randomIndex }));
+      results.push(await finalizeGiveaway(client, row, { targetDatabase: activeDatabase, storage, now, randomIndex }));
     } catch (error) {
-      console.error(`[FyxBot] Tirage du concours ${row.giveaway_id} impossible :`, error);
+      logger.error({ err: error, giveawayId: row.giveaway_id }, '[FyxBot] Tirage du concours impossible.');
       results.push({ giveawayId: row.giveaway_id, error: error.message });
     }
   }
   return results;
 }
 
-function recoverInterruptedGiveaways({ targetDatabase } = {}) {
+async function recoverInterruptedGiveaways({ targetDatabase, storage } = {}) {
+  storage = resolveRuntimeStore('giveaways', storage);
+  if (storage) return storage.recoverInterruptedGiveaways();
   const activeDatabase = targetDatabase || defaultDatabase();
   return activeDatabase.prepare("UPDATE community_giveaways SET status = 'active' WHERE status = 'drawing'").run().changes;
 }
 
-function startGiveawayScheduler(client, { targetDatabase, intervalMs = 60_000 } = {}) {
+async function startGiveawayScheduler(client, { targetDatabase, storage, intervalMs = 60_000 } = {}) {
+  storage = resolveRuntimeStore('giveaways', storage);
   let running = false;
-  recoverInterruptedGiveaways({ targetDatabase });
+  await recoverInterruptedGiveaways({ targetDatabase, storage });
   const run = async () => {
     if (running) return;
     running = true;
     try {
-      await finalizeDueGiveaways(client, { targetDatabase });
+      await finalizeDueGiveaways(client, { targetDatabase, storage });
     } catch (error) {
-      console.error('[FyxBot] Vérification des concours impossible :', error);
+      logger.error({ err: error }, '[FyxBot] Vérification des concours impossible.');
     } finally {
       running = false;
     }

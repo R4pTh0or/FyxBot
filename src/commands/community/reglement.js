@@ -10,6 +10,7 @@ const {
   publishRules,
   updateRulesMessage,
 } = require('../../services/rules');
+const { assignableRoleIssue, assignableRoleMessage } = require('../../services/safeAssignableRoles');
 
 const REQUIRED_RULES_CHANNEL_PERMISSIONS = Object.freeze([
   [PermissionFlagsBits.ViewChannel, 'Voir le salon'],
@@ -31,10 +32,11 @@ function validatePublishChannel(guild, channel) {
 
 function validateRole(interaction, role) {
   if (!role) return null;
-  if (role.managed || role.id === interaction.guild.id
-    || interaction.guild.members.me.roles.highest.comparePositionTo(role) <= 0) {
-    throw new Error(`FyxBot ne peut pas attribuer ${role}. Placez son rôle au-dessus dans Discord.`);
-  }
+  const issue = assignableRoleIssue(interaction.guild, role, {
+    actorMember: interaction.member,
+    actorIsOwner: interaction.guild.ownerId === interaction.user.id,
+  });
+  if (issue) throw new Error(assignableRoleMessage(issue, role));
   return role;
 }
 

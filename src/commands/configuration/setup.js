@@ -26,6 +26,13 @@ function compactList(values, empty = 'Aucun', maximum = 8) {
   return values.length > maximum ? `${visible}… (+${values.length - maximum})` : visible;
 }
 
+function compactLines(values, empty = 'Aucune explication disponible', maximum = 6) {
+  if (!values?.length) return empty;
+  const visible = values.slice(0, maximum).join('\n');
+  const suffix = values.length > maximum ? `\n… et ${values.length - maximum} autre(s) catégorie(s).` : '';
+  return `${visible}${suffix}`.slice(0, 1024);
+}
+
 function blueprintEmbed(guild, blueprint, analysis) {
   const textChannels = blueprint.channels.filter((channel) => channel.type !== 'voice').map((channel) => `#${channel.name}`);
   const voiceChannels = blueprint.channels.filter((channel) => channel.type === 'voice').map((channel) => `🔊 ${channel.name}`);
@@ -38,6 +45,10 @@ function blueprintEmbed(guild, blueprint, analysis) {
       { name: `Catégories · ${blueprint.categories.length}`, value: compactList(blueprint.categories.map((category) => category.name), 'Aucune', 10) },
       { name: `Salons texte · ${textChannels.length}`, value: compactList(textChannels, 'Aucun', 12) },
       { name: `Salons vocaux · ${voiceChannels.length}`, value: compactList(voiceChannels, 'Aucun', 8) },
+      {
+        name: 'Pourquoi cette organisation ?',
+        value: compactLines((blueprint.explanations || []).map((item) => `**${item.name}** — ${item.reason}`)),
+      },
       { name: 'Impact sur le serveur actuel', value: `${analysis.totals.missing} élément(s) à créer · ${analysis.totals.permissionIssues} permission(s) à corriger · ${analysis.totals.extras} élément(s) existant(s) conservé(s).` },
       { name: 'Étape suivante', value: '`/setup completer` conserve tout · `/setup synchroniser` répare aussi les permissions · `/setup reconstruire` sauvegarde puis recrée.' },
     )
@@ -157,13 +168,13 @@ module.exports = {
     if (subcommand === 'concevoir') {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const blueprint = buildAdaptiveBlueprint(interaction.options.getString('description', true), { guildName: interaction.guild.name });
-      saveServerSetupDraft(interaction.guild.id, blueprint);
+      await saveServerSetupDraft(interaction.guild.id, blueprint);
       const analysis = await analyzeServerStructure(interaction.guild, {}, blueprint);
       return interaction.editReply({ embeds: [blueprintEmbed(interaction.guild, blueprint, analysis)] });
     }
 
     if (subcommand === 'analyser' || subcommand === 'apercu') {
-      const blueprint = getServerSetupBlueprint(interaction.guild.id);
+      const blueprint = await getServerSetupBlueprint(interaction.guild.id);
       if (!blueprint) return replyMissingBlueprint(interaction);
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       const analysis = await analyzeServerStructure(interaction.guild, {}, blueprint);
@@ -215,7 +226,7 @@ module.exports = {
       return interaction.reply({ content: `Confirmation incorrecte. Écrivez exactement **${expected}**.`, flags: MessageFlags.Ephemeral });
     }
 
-    const blueprint = getServerSetupBlueprint(interaction.guild.id);
+    const blueprint = await getServerSetupBlueprint(interaction.guild.id);
     if (!blueprint) return replyMissingBlueprint(interaction);
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const destructive = subcommand === 'reconstruire';

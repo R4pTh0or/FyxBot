@@ -1,4 +1,5 @@
 const { randomUUID } = require('node:crypto');
+const { resolveRuntimeStore } = require('../database/runtimeStorage');
 
 function defaultDatabase() {
   return require('../database/database').database;
@@ -38,11 +39,19 @@ function purgeGuildDatabaseData(guildId, {
     counts.configurations = activeDatabase.prepare('DELETE FROM configurations WHERE guild_id = ?').run(guildId).changes;
     counts.warnings = activeDatabase.prepare('DELETE FROM warnings WHERE guild_id = ?').run(guildId).changes;
     counts.auditLogs = activeDatabase.prepare('DELETE FROM audit_logs WHERE guild_id = ?').run(guildId).changes;
+    counts.changeHistory = activeDatabase.prepare('DELETE FROM change_history WHERE guild_id = ?').run(guildId).changes;
     counts.suggestions = activeDatabase.prepare('DELETE FROM suggestions WHERE guild_id = ?').run(guildId).changes;
     counts.commandUsage = activeDatabase.prepare('DELETE FROM command_usage WHERE guild_id = ?').run(guildId).changes;
     counts.activationProgress = activeDatabase.prepare('DELETE FROM guild_activation_progress WHERE guild_id = ?').run(guildId).changes;
     counts.premiumEntitlements = activeDatabase.prepare('DELETE FROM premium_entitlements WHERE guild_id = ?').run(guildId).changes;
     counts.premiumGuildLinks = activeDatabase.prepare('DELETE FROM premium_user_guilds WHERE guild_id = ?').run(guildId).changes;
+    counts.twitchConnections = activeDatabase.prepare('DELETE FROM twitch_connections WHERE guild_id = ?').run(guildId).changes;
+    counts.twitchOAuthStates = activeDatabase.prepare('DELETE FROM twitch_oauth_states WHERE guild_id = ?').run(guildId).changes;
+    counts.twitchCommands = activeDatabase.prepare('DELETE FROM twitch_custom_commands WHERE guild_id = ?').run(guildId).changes;
+    counts.twitchChatConfig = activeDatabase.prepare('DELETE FROM twitch_chat_config WHERE guild_id = ?').run(guildId).changes;
+    counts.twitchRuntime = activeDatabase.prepare('DELETE FROM twitch_runtime_status WHERE guild_id = ?').run(guildId).changes;
+    counts.twitchProcessedMessages = activeDatabase.prepare('DELETE FROM twitch_processed_messages WHERE guild_id = ?').run(guildId).changes;
+    counts.twitchEventSubMessages = activeDatabase.prepare('DELETE FROM twitch_eventsub_messages WHERE guild_id = ?').run(guildId).changes;
     const supportRequestIds = activeDatabase.prepare('SELECT id FROM support_requests WHERE guild_id = ?').all(guildId).map((row) => row.id);
     counts.supportMessages = supportRequestIds.reduce((total, requestId) => total
       + activeDatabase.prepare('DELETE FROM support_messages WHERE request_id = ?').run(requestId).changes, 0);
@@ -69,15 +78,19 @@ function purgeGuildDatabaseData(guildId, {
 
 async function purgeGuildData(guildId, {
   targetDatabase,
+  dataStore,
   clearWarnings,
   deleteBackups,
   anonymousId,
   now,
 } = {}) {
-  const activeDatabase = targetDatabase || defaultDatabase();
+  dataStore = resolveRuntimeStore('dataRetention', dataStore);
+  if (dataStore && targetDatabase) throw new Error('Choisissez un seul magasin de données pour la purge.');
   const warningCleaner = clearWarnings || require('../database/warningStore').clearGuildWarnings;
   const backupCleaner = deleteBackups || require('./serverBackup').deleteServerBackups;
-  const counts = purgeGuildDatabaseData(guildId, { targetDatabase: activeDatabase, anonymousId, now });
+  const counts = dataStore
+    ? await dataStore.purgeGuildDatabaseData(guildId, { anonymousId, now })
+    : purgeGuildDatabaseData(guildId, { targetDatabase: targetDatabase || defaultDatabase(), anonymousId, now });
   const [warningCount, backupCount] = await Promise.all([
     warningCleaner(guildId),
     backupCleaner(guildId),

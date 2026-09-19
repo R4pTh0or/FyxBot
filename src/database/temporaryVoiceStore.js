@@ -1,11 +1,11 @@
-const { getConfiguration, setConfiguration } = require('./database');
+const defaultStorage = require('./defaultConfigurationStorage');
 
-function getTemporaryVoiceConfig(guildId) {
-  return getConfiguration(guildId, 'temporaryVoice');
+async function getTemporaryVoiceConfig(guildId, storage = defaultStorage) {
+  return storage.getConfiguration(guildId, 'temporaryVoice');
 }
 
-function setTemporaryVoiceConfig(guildId, config) {
-  return setConfiguration(guildId, 'temporaryVoice', config);
+async function setTemporaryVoiceConfig(guildId, config, storage = defaultStorage) {
+  return storage.setConfiguration(guildId, 'temporaryVoice', config);
 }
 
 module.exports = { getTemporaryVoiceConfig, setTemporaryVoiceConfig };

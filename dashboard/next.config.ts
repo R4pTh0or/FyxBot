@@ -5,7 +5,7 @@ const isProduction = process.env.NODE_ENV === "production";
 
 function configuredClientOrigins() {
   const origins = new Set<string>();
-  for (const value of [process.env.VITE_FYXBOT_API_URL, process.env.VITE_NEXORA_API_URL]) {
+  for (const value of [process.env.VITE_FYXBOT_API_URL]) {
     if (!value) continue;
     try {
       const url = new URL(value);
@@ -43,6 +43,8 @@ const contentSecurityPolicy = [
 
 const securityHeaders = [
   { key: "Content-Security-Policy", value: contentSecurityPolicy },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin" },
+  { key: "Cross-Origin-Resource-Policy", value: "same-origin" },
   { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
   { key: "Strict-Transport-Security", value: "max-age=31536000; includeSubDomains" },
@@ -57,7 +59,6 @@ const nextConfig: NextConfig = {
   expireTime: 60,
   async rewrites() {
     const apiOrigin = (process.env.FYXBOT_API_ORIGIN
-      || process.env.NEXORA_API_ORIGIN
       || "http://127.0.0.1:3001").replace(/\/$/, "");
     return [{
       source: "/api/:path*",

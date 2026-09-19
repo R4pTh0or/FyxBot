@@ -8,15 +8,21 @@
   "scripts": {
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
+    "dashboard:local": "node scripts/start-dashboard-local.js",
     "deploy": "node src/deploy-commands.js",
     "deploy:global": "node src/deploy-commands.js --global",
     "deploy:global:no-premium": "node src/deploy-commands.js --global --exclude-premium",
     "deploy:clear-guild": "node src/deploy-commands.js --clear-guild",
-    "check": "node --check src/index.js && node --check src/deploy-commands.js",
-    "test": "node --test tests/activation-analytics.test.js tests/backend-security.test.js tests/channel-creation.test.js tests/command-access.test.js tests/command-deployment.test.js tests/community-features.test.js tests/community-giveaways.test.js tests/data-retention.test.js tests/dashboard-auth-cleanup.test.js tests/external-backup.test.js tests/local-backup-security.test.js tests/monitoring.test.js tests/permission-migration.test.js tests/premium-entitlements.test.js tests/premium-founder-access.test.js tests/release-manifest.test.js tests/server-setup.test.js tests/support-management.test.js tests/transcript-security.test.js",
+    "check": "node scripts/check-javascript.js",
+    "typecheck": "tsc -p jsconfig.json",
+    "test": "node --require ./tests/test-environment.js --test tests/activation-analytics.test.js tests/backend-security.test.js tests/channel-creation.test.js tests/command-access.test.js tests/command-deployment.test.js tests/community-features.test.js tests/community-giveaways.test.js tests/content-trash.test.js tests/data-retention.test.js tests/dashboard-auth-cleanup.test.js tests/dashboard-local-runner.test.js tests/external-backup.test.js tests/fyxpilot-v2.test.js tests/local-backup-security.test.js tests/logger.test.js tests/monitoring.test.js tests/permission-migration.test.js tests/postgres-activity-store.test.js tests/postgres-configuration-store.test.js tests/postgres-creator-stats-store.test.js tests/postgres-dashboard-auth-store.test.js tests/postgres-data-retention.test.js tests/postgres-founder-access.test.js tests/postgres-giveaway-store.test.js tests/postgres-migration.test.js tests/postgres-premium-entitlements.test.js tests/postgres-runtime-storage.test.js tests/postgres-snapshot.test.js tests/postgres-support-store.test.js tests/postgres-twitch-store.test.js tests/postgres-warning-store.test.js tests/premium-entitlements.test.js tests/premium-founder-access.test.js tests/published-message-store.test.js tests/release-manifest.test.js tests/server-setup.test.js tests/support-management.test.js tests/test-environment.test.js tests/transcript-security.test.js tests/twitch-api.test.js tests/twitch-chat-client.test.js tests/twitch-command-registry.test.js tests/twitch-connection-manager.test.js tests/twitch-dashboard-api.test.js tests/twitch-eventsub.test.js tests/twitch-storage.test.js",
+    "validate": "pnpm run check && pnpm run typecheck && pnpm test",
     "monitor:health": "node scripts/monitor-health.js",
     "simulate:50": "node scripts/load-simulation.js --users 50",
     "simulate:200": "node scripts/load-simulation.js --users 200",
+    "database:postgres:dry-run": "node scripts/migrate-sqlite-to-postgres.js --dry-run",
+    "database:postgres:rehearse": "node scripts/rehearse-postgres-migration.js",
+    "database:postgres:migrate": "node scripts/migrate-sqlite-to-postgres.js --apply",
     "test:discord-setup": "node scripts/check-server-setup.js --guild-name \"FyxBot Développement\"",
     "test:discord-120": "node scripts/test-release-120.js --guild-name \"FyxBot Développement\" --confirm PUBLIER_APERCUS"
   },
@@ -33,6 +39,14 @@
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1111.0",
     "discord.js": "^14.22.1",
-    "dotenv": "^17.2.3"
+    "dotenv": "^17.2.3",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/node": "^26.4.0",
+    "pino-pretty": "^13.1.3",
+    "typescript": "^7.0.2"
   }
 }

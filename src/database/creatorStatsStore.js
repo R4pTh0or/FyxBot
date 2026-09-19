@@ -1,17 +1,23 @@
-const { database } = require('./database');
 const { getCommandUsageStats } = require('./commandUsageStore');
 const { ensureActivationTracking, getActivationStats } = require('./activationStore');
+const { resolveRuntimeStore } = require('./runtimeStorage');
 
-function recordGuild(guild) {
+async function recordGuild(guild, storage = null, options = {}) {
+  const selected = resolveRuntimeStore('creatorStats', storage);
+  if (selected) return selected.recordGuild(guild, options);
+  const { database } = require('./database');
   const now = new Date().toISOString();
   database.prepare(`INSERT INTO guild_installations (guild_id, guild_name, member_count, first_seen_at, last_seen_at, removed_at)
     VALUES (?, ?, ?, ?, ?, NULL) ON CONFLICT(guild_id) DO UPDATE SET guild_name=excluded.guild_name,
     member_count=excluded.member_count, last_seen_at=excluded.last_seen_at, removed_at=NULL`)
     .run(guild.id, guild.name, guild.memberCount || 0, now, now);
-  ensureActivationTracking(guild.id, { now });
+  await ensureActivationTracking(guild.id, { now });
 }
 
-function markGuildRemoved(guild) {
+async function markGuildRemoved(guild, storage = null, options = {}) {
+  const selected = resolveRuntimeStore('creatorStats', storage);
+  if (selected) return selected.markGuildRemoved(guild, options);
+  const { database } = require('./database');
   const now = new Date().toISOString();
   database.prepare(`INSERT INTO guild_installations (guild_id, guild_name, member_count, first_seen_at, last_seen_at, removed_at)
     VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(guild_id) DO UPDATE SET guild_name=excluded.guild_name,
@@ -19,9 +25,12 @@ function markGuildRemoved(guild) {
     .run(guild.id, guild.name, guild.memberCount || 0, now, now, now);
 }
 
-function syncCreatorStats(guilds) {
+async function syncCreatorStats(guilds, storage = null, options = {}) {
+  const selected = resolveRuntimeStore('creatorStats', storage);
+  if (selected) return selected.syncCreatorStats(guilds, options);
+  const { database } = require('./database');
   const list = [...guilds];
-  list.forEach(recordGuild);
+  for (const guild of list) await recordGuild(guild);
   const guildCount = list.length;
   const memberCount = list.reduce((total, guild) => total + (guild.memberCount || 0), 0);
   const now = new Date().toISOString();
@@ -31,10 +40,13 @@ function syncCreatorStats(guilds) {
   return { guildCount, memberCount };
 }
 
-function getCreatorStats(guilds) {
+async function getCreatorStats(guilds, storage = null, options = {}) {
+  const selected = resolveRuntimeStore('creatorStats', storage);
+  if (selected) return selected.getCreatorStats(guilds, options);
+  const { database } = require('./database');
   const list = [...guilds];
-  const totals = syncCreatorStats(list);
-  const activation = getActivationStats(list.map((guild) => guild.id));
+  const totals = await syncCreatorStats(list);
+  const activation = await getActivationStats(list.map((guild) => guild.id));
   const activationByGuild = new Map(activation.guilds.map((guild) => [guild.guildId, guild]));
   const installations = database.prepare(`SELECT guild_id AS guildId, guild_name AS guildName, member_count AS memberCount,
     first_seen_at AS firstSeenAt FROM guild_installations WHERE removed_at IS NULL ORDER BY member_count DESC`).all();
@@ -49,7 +61,7 @@ function getCreatorStats(guilds) {
     FROM creator_metrics ORDER BY day DESC LIMIT 30`).all().reverse();
   const allTime = database.prepare('SELECT COUNT(*) AS total FROM guild_installations').get().total;
   const removed = database.prepare('SELECT COUNT(*) AS total FROM guild_installations WHERE removed_at IS NOT NULL').get().total;
-  const usage = getCommandUsageStats();
+  const usage = await getCommandUsageStats();
   const { guilds: _guildActivationRows, ...activationSummary } = activation;
   return {
     ...totals,

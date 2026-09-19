@@ -1,8 +1,7 @@
-const { database } = require('../database/database');
-
 const FOUNDER_USER_LIMIT = 100;
 const FOUNDER_TRIAL_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
+const { resolveRuntimeStore } = require('../database/runtimeStorage');
 
 class FounderAccessError extends Error {
   constructor(code, message) {
@@ -14,7 +13,7 @@ class FounderAccessError extends Error {
 }
 
 function activeDatabase(targetDatabase) {
-  return targetDatabase || database;
+  return targetDatabase || require('../database/database').database;
 }
 
 function validateSnowflake(value, label) {
@@ -33,11 +32,16 @@ function isTrialActive(row, now) {
   return Boolean(row) && new Date(row.starts_at) <= now && new Date(row.ends_at) > now;
 }
 
-function getFounderProgramState(userId, guildId, {
+async function getFounderProgramState(userId, guildId, {
   targetDatabase,
+  storage,
   now = new Date(),
   limit = FOUNDER_USER_LIMIT,
 } = {}) {
+  storage = resolveRuntimeStore('founderAccess', storage);
+  if (storage?.getFounderProgramState) {
+    return storage.getFounderProgramState(userId, guildId, { now, limit });
+  }
   const store = activeDatabase(targetDatabase);
   const observedAt = normalizeNow(now);
   const normalizedUserId = userId ? validateSnowflake(userId, 'Compte Discord') : null;
@@ -69,12 +73,17 @@ function getFounderProgramState(userId, guildId, {
   };
 }
 
-function claimFounderAccess(userId, guildId, {
+async function claimFounderAccess(userId, guildId, {
   targetDatabase,
+  storage,
   now = new Date(),
   limit = FOUNDER_USER_LIMIT,
   durationDays = FOUNDER_TRIAL_DAYS,
 } = {}) {
+  storage = resolveRuntimeStore('founderAccess', storage);
+  if (storage?.claimFounderAccess) {
+    return storage.claimFounderAccess(userId, guildId, { now, limit, durationDays });
+  }
   const store = activeDatabase(targetDatabase);
   const normalizedUserId = validateSnowflake(userId, 'Compte Discord');
   const normalizedGuildId = validateSnowflake(guildId, 'Serveur Discord');
@@ -108,7 +117,7 @@ function claimFounderAccess(userId, guildId, {
     store.exec('COMMIT');
     return {
       created,
-      ...getFounderProgramState(normalizedUserId, normalizedGuildId, {
+      ...await getFounderProgramState(normalizedUserId, normalizedGuildId, {
         targetDatabase: store,
         now: startsAt,
         limit,

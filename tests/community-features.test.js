@@ -8,7 +8,7 @@ const {
   zonedDateParts,
 } = require('../src/services/birthdays');
 const { validateSocialUrl } = require('../src/services/socialNotifications');
-const { normalizeSocialSource, parseYouTubeFeed } = require('../src/services/socialAutomation');
+const { normalizeSocialSource, parseYouTubeFeed, replaceSocialSource } = require('../src/services/socialAutomation');
 const { buildOnboardingProgress } = require('../src/services/onboardingProgress');
 const { onboardingPayload, publicPanelUrl } = require('../src/services/guildOnboarding');
 const { communityPollPayload } = require('../src/services/communityPolls');
@@ -17,7 +17,7 @@ const { normalizeGiveaway, selectWinners } = require('../src/services/communityG
 const { PLANS, PREMIUM_ENFORCEMENT_ENABLED } = require('../src/services/premiumPlans');
 const { sanitizeRoomName } = require('../src/services/temporaryVoice');
 const { RULE_TEMPLATES, rulesPayload } = require('../src/services/rules');
-const { customMessagePayload, normalizeHexColor } = require('../src/services/customMessages');
+const { customMessagePayload, normalizeHexColor, publicMessagePayload } = require('../src/services/customMessages');
 const { validatePublishChannel } = require('../src/commands/community/reglement');
 const {
   CHANGELOG_CHANNEL_NAME,
@@ -68,6 +68,41 @@ test('valide les sources automatiques et lit le dernier contenu YouTube', () => 
   });
 });
 
+test('modifie une source sociale sans perdre son suivi si son identité reste identique', () => {
+  const current = [{
+    id: 'twitch:fyxbot_live',
+    platform: 'twitch',
+    identifier: 'fyxbot_live',
+    label: 'Ancien nom',
+    enabled: true,
+    createdAt: '2026-08-20T10:00:00.000Z',
+    lastItemId: 'live-42',
+    lastCheckedAt: '2026-08-31T10:00:00.000Z',
+  }];
+  const result = replaceSocialSource(current, 'twitch:fyxbot_live', {
+    platform: 'twitch', identifier: 'FyxBot_Live', label: 'FyxBot en direct',
+  }, new Date('2026-09-01T10:00:00.000Z'));
+  assert.equal(result.identityChanged, false);
+  assert.equal(result.source.label, 'FyxBot en direct');
+  assert.equal(result.source.lastItemId, 'live-42');
+  assert.equal(result.source.updatedAt, '2026-09-01T10:00:00.000Z');
+  assert.equal(current[0].label, 'Ancien nom');
+});
+
+test('réinitialise le suivi lors du remplacement de la chaîne surveillée', () => {
+  const result = replaceSocialSource([{
+    id: 'twitch:ancienne', platform: 'twitch', identifier: 'ancienne', label: 'Ancienne',
+    createdAt: '2026-08-20T10:00:00.000Z', lastItemId: 'live-42', lastError: 'Erreur passée',
+  }], 'twitch:ancienne', {
+    platform: 'twitch', identifier: 'nouvelle', label: 'Nouvelle chaîne',
+  }, new Date('2026-09-01T10:00:00.000Z'));
+  assert.equal(result.identityChanged, true);
+  assert.equal(result.source.id, 'twitch:nouvelle');
+  assert.equal(result.source.status, 'pending');
+  assert.equal(result.source.lastItemId, undefined);
+  assert.equal(result.source.lastError, undefined);
+});
+
 test('calcule le parcours guidé depuis la configuration réelle', () => {
   const progress = buildOnboardingProgress({
     setupBlueprint: { description: 'Serveur communautaire' },
@@ -78,6 +113,8 @@ test('calcule le parcours guidé depuis la configuration réelle', () => {
   assert.equal(progress.totalCount, 7);
   assert.equal(progress.percent, 57);
   assert.equal(progress.steps.find((step) => step.key === 'security').complete, true);
+  assert.equal(progress.recommendedStep.key, 'rules');
+  assert.equal(progress.healthLevel, 'starting');
 });
 
 test('prépare un message d’arrivée avec un lien public sécurisé vers le panel', () => {
@@ -246,6 +283,16 @@ test('reproduit un changelog Discord structuré et sécurisé', () => {
   assert.throws(() => customMessagePayload({ content: 'Test', imageUrl: 'http://example.com/image.png' }), /HTTPS/);
   assert.throws(() => customMessagePayload({ mode: 'changelog', title: 'Incomplet' }), /version, un titre et une description/);
   assert.equal(normalizeHexColor('#EF4444'), 0xef4444);
+});
+
+test('réserve le format changelog au système automatique FyxBot', () => {
+  assert.throws(
+    () => publicMessagePayload({ mode: 'changelog', title: 'Tentative publique', description: 'Refusée', version: '9.9.9' }),
+    /réservé aux annonces automatiques officielles/i,
+  );
+  const payload = publicMessagePayload({ mode: 'message', title: 'Annonce publique', description: 'Message autorisé.' });
+  assert.equal(payload.embeds[0].toJSON().title, 'Annonce publique');
+  assert.equal(payload.embeds[0].toJSON().fields?.length || 0, 0);
 });
 
 test('ignore les versions en préparation et détecte les correctifs publiés', () => {

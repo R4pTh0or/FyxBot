@@ -2,6 +2,26 @@
 
 Les évolutions importantes de FyxBot sont documentées dans ce fichier et sur la page publique `/changelog`.
 
+## V2 — Chantier local, non publié
+
+### Stabilisation de la future version 2.0.0
+
+- Documentation alignée sur la version 1.5.0 et checklist V2 centralisée dans `docs/V2-READINESS.md`.
+- Données de test isolées dans un dossier temporaire afin qu'une validation locale ne lise ou ne modifie jamais la base de développement.
+- Validation locale complète : syntaxe, types, 275 tests bot, lint, build et 5 tests panel.
+- FyxPilot Studio retenu comme cœur de la V2 : comparatif, brouillons, historique et retour arrière guidé.
+- Préproduction, exercice réel de restauration R2 et période de stabilité requis avant toute annonce 2.0.0.
+
+### FyxStream intégré
+
+- Regroupement des fonctions Twitch dans FyxBot, sans service ou domaine FyxStream séparé.
+- Connexion OAuth, chat IRC, commandes personnalisées, protections et réception sécurisée des événements Twitch.
+- Commandes de modération `!mod`, `!ban`, `!unban`, `!timeout`, `!clear` et `!slow`.
+- Les connexions antérieures aux nouvelles autorisations de modération doivent être reconnectées une fois depuis le panel.
+- Le journal de modération, les alertes OAuth et le test réel sur une chaîne de développement restent nécessaires avant de déclarer la V2 terminée.
+
+Cette section décrit des changements locaux non publiés. La version publique reste celle indiquée par le manifeste de publication.
+
 ## [1.5.0] — 28 août 2026
 
 ### Ajouté

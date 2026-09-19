@@ -1,5 +1,68 @@
 # Mise en ligne de FyxBot sur Railway
 
+## Préparation PostgreSQL (sans bascule immédiate)
+
+FyxBot conserve actuellement SQLite comme stockage actif. Une migration sûre
+vers PostgreSQL est préparée avec un schéma isolé `fyxbot`, afin de ne jamais
+mélanger les données avec une autre application partageant le même service.
+
+Contrôle local, sans connexion ni écriture distante : l'outil crée une sauvegarde
+SQLite cohérente dans le dossier temporaire du système, vérifie son intégrité,
+les 27 tables attendues et la correspondance des colonnes, puis efface cette
+copie temporaire. La base source reste ouverte en lecture seule. Si un
+`warnings.json` se trouve à côté de la base SQLite, il est la source active
+des avertissements et remplace les éventuelles anciennes lignes SQLite. S'il
+est absent, aucun avertissement n'est actif : les anciennes lignes SQLite ne
+sont pas ressuscitées. Le contrôle refuse un JSON invalide ou des identifiants
+dupliqués.
+
+```powershell
+pnpm database:postgres:dry-run
+```
+
+Répétition complète de l'import sur PostgreSQL embarqué et éphémère, toujours
+sans connexion Railway ; seules les quantités sont affichées :
+
+```powershell
+pnpm database:postgres:rehearse
+```
+
+Cette répétition valide le SQL et le transfert local, mais ne remplace pas un
+essai du runtime complet sur une instance PostgreSQL de préproduction.
+
+La migration réelle exige `FYXBOT_POSTGRES_URL` et s'exécute dans une
+transaction. Elle refuse une destination déjà remplie, compare le nombre de
+lignes table par table et annule automatiquement l'ensemble en cas d'écart.
+Cette commande est documentée pour la future fenêtre de bascule, **pas pour
+être lancée dès maintenant** :
+
+```powershell
+pnpm database:postgres:migrate
+```
+
+Le bot et le panel utilisent encore les accès SQLite synchrones. Définir
+`FYXBOT_POSTGRES_URL` ne les convertit pas à PostgreSQL. Avant tout import de
+production, adapter et tester tous les accès du runtime, disposer d'une
+sauvegarde restaurable et arrêter les écritures SQLite pendant l'import et la
+bascule. Après import, comparer les données puis ne rouvrir le service qu'une
+fois le runtime PostgreSQL vérifié. En cas d'échec, garder SQLite comme source
+de vérité et ne pas exposer un bot partiellement migré.
+
+État du développement local : les magasins PostgreSQL de configurations,
+d'avertissements, de support, de personnel Support, de sessions/OAuth du panel,
+de journaux, de suggestions, de statistiques de commandes, de statistiques
+créateur/activation, de droits Premium Discord, d'essais Fondateur, de concours,
+de connexions/commandes Twitch, de rétention des données en base et
+d'historique sont implémentés et testés, mais **pas encore sélectionnés par le
+runtime du bot ou du panel**. `/setup`, la bibliothèque des messages publiés
+et la corbeille acceptent désormais des magasins de configurations asynchrones
+et ont des tests PostgreSQL. La rétention des fichiers annexes et les autres
+magasins synchrones doivent encore être convertis. Il faut ensuite adapter les appels
+du runtime, les sauvegardes et les tests de bout en bout avant tout changement
+de moteur global. Aucun indicateur d'environnement ne doit activer quelques
+magasins seulement en production : cela répartirait les données entre SQLite
+et PostgreSQL. Voir `POSTGRES_CUTOVER.md` pour les critères de bascule.
+
 FyxBot utilise deux services dans un même projet Railway :
 
 1. **fyxbot-bot** depuis la racine du projet : bot Discord et API sécurisée.

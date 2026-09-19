@@ -42,6 +42,9 @@ test('charge Premium dans le bot public', async () => {
 
   assert.equal(client.commands.has('premium'), true);
   assert.equal(client.commands.has('communaute'), true);
+  for (const commandName of ['modhelp', 'slowmode', 'lock', 'unlock']) {
+    assert.equal(client.commands.has(commandName), true, `La commande /${commandName} doit être chargée.`);
+  }
 });
 
 test('place toutes les options obligatoires avant les options facultatives', async () => {

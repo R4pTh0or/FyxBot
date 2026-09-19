@@ -2,7 +2,7 @@
 
 ## Environnement de travail
 
-Ce dossier `FyxBot-Developpement` est l'environnement local réservé aux modifications et aux tests. Le dossier voisin `FyxBot` est la référence stable et ne doit pas être modifié pendant le développement.
+Le dossier `C:\Fyxbot` est l'environnement local réservé aux modifications et aux tests avant publication.
 
 Toute modification doit être validée localement ici. Aucun export, déploiement Railway ou changement public ne doit être effectué sans confirmation explicite de l'utilisateur.
 

@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import Image from "next/image";
 import releaseManifest from "../release-manifest.json";
 
-export const dynamic = "force-static";
+export const revalidate = 30;
 
 export const metadata: Metadata = {
   title: "Changelog FyxBot — Nouveautés et améliorations",
