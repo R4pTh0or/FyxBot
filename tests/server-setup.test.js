@@ -14,6 +14,7 @@ const {
   analyzeServerStructure,
   CATEGORY_DEFINITIONS,
   CHANNEL_DEFINITIONS,
+  findManageableChannelCandidate,
   manageablePermissionOverwrites,
   normalizedBlueprintName,
   permissionOverwritesMatch,
@@ -234,6 +235,36 @@ test('hérite des permissions de catégorie sans remplacer les droits protégés
   assert.deepEqual(edits.map((entry) => entry.id), [everyone.id]);
   assert.equal(edits[0].options.SendMessages, false);
   assert.equal(edits.some((entry) => entry.id === administrator.id), false);
+});
+
+test('préserve un salon privé inaccessible et sélectionne uniquement un salon gérable', () => {
+  const guild = { members: { me: { id: 'bot-a' } } };
+  const hidden = {
+    id: 'channel-hidden',
+    parentId: 'old-category',
+    permissionsFor: () => new PermissionsBitField([PermissionFlagsBits.ManageChannels]),
+  };
+  const manageable = {
+    id: 'channel-manageable',
+    parentId: 'staff-category',
+    permissionsFor: () => new PermissionsBitField([
+      PermissionFlagsBits.ViewChannel,
+      PermissionFlagsBits.ManageChannels,
+    ]),
+  };
+
+  assert.equal(
+    findManageableChannelCandidate(guild, new Collection([[hidden.id, hidden]]), 'staff-category'),
+    null,
+  );
+  assert.equal(
+    findManageableChannelCandidate(
+      guild,
+      new Collection([[hidden.id, hidden], [manageable.id, manageable]]),
+      'staff-category',
+    ),
+    manageable,
+  );
 });
 
 test('adapte automatiquement les permissions à ACCUEIL, aux membres vérifiés et au STAFF', () => {

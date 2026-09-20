@@ -426,12 +426,23 @@ function discordChannelType(definition) {
   return definition.type === 'voice' ? ChannelType.GuildVoice : ChannelType.GuildText;
 }
 
+function botCanManageChannel(guild, channel) {
+  const permissions = channel.permissionsFor?.(guild.members.me);
+  return permissions?.has(PermissionFlagsBits.ViewChannel) === true
+    && permissions.has(PermissionFlagsBits.ManageChannels) === true;
+}
+
+function findManageableChannelCandidate(guild, candidates, categoryId) {
+  const manageableCandidates = candidates.filter((channel) => botCanManageChannel(guild, channel));
+  return manageableCandidates.find((channel) => channel.parentId === categoryId)
+    || (manageableCandidates.size === 1 ? manageableCandidates.first() : null);
+}
+
 async function findOrCreateChannel(guild, category, definition, profiles, synchronizePermissions) {
   const expectedType = discordChannelType(definition);
   const candidates = guild.channels.cache.filter((channel) => channel.type === expectedType
     && normalizedBlueprintName(channel.name) === normalizedBlueprintName(definition.name));
-  const existing = candidates.find((channel) => channel.parentId === category.id)
-    || (candidates.size === 1 ? candidates.first() : null);
+  const existing = findManageableChannelCandidate(guild, candidates, category.id);
   const permissionOverwrites = definition.profile === 'inherit' ? undefined : profiles[definition.profile];
   if (!existing) {
     const createdChannel = await guild.channels.create({
@@ -521,9 +532,12 @@ async function analyzeServerStructure(guild, fetched = {}, blueprint) {
     const targetCategory = categories[definition.category];
     const matches = guild.channels.cache.filter((existingChannel) => existingChannel.type === discordChannelType(definition)
       && normalizedBlueprintName(existingChannel.name) === normalizedBlueprintName(definition.name));
-    const existingChannel = targetCategory ? matches.find((item) => item.parentId === targetCategory.id) : null;
+    const manageableMatches = matches.filter((channel) => botCanManageChannel(guild, channel));
+    const existingChannel = targetCategory
+      ? manageableMatches.find((item) => item.parentId === targetCategory.id)
+      : null;
     if (!existingChannel) {
-      if (matches.size > 0) misplacedChannels.push(definition.name);
+      if (manageableMatches.size > 0) misplacedChannels.push(definition.name);
       else missingChannels.push(definition.name);
       continue;
     }
@@ -693,6 +707,7 @@ module.exports = {
   MANAGEMENT_PERMISSIONS,
   ROLE_DEFINITIONS,
   analyzeServerStructure,
+  findManageableChannelCandidate,
   grantableRolePermissions,
   missingSetupPermissions,
   manageablePermissionOverwrites,
