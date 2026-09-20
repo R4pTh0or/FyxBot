@@ -1593,7 +1593,6 @@ function startDashboardServer(client, options = {}) {
             buttonLabel: body.buttonLabel,
             footer: body.footer,
             version: body.version,
-            environment: body.environment,
           });
         } catch (error) {
           throw new HttpError(400, error.message);

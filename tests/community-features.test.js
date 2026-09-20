@@ -270,7 +270,6 @@ test('reproduit un changelog Discord structuré et sécurisé', () => {
   const payload = customMessagePayload({
     mode: 'changelog',
     version: '1.2.0',
-    environment: 'production',
     title: 'Constructeur de messages',
     description: 'Texte, embeds et images sont disponibles.',
     linkUrl: 'https://example.com/changelog',
@@ -278,8 +277,8 @@ test('reproduit un changelog Discord structuré et sécurisé', () => {
   });
   const embed = payload.embeds[0].toJSON();
   assert.equal(embed.title, '◆ Constructeur de messages');
-  assert.deepEqual(embed.fields.map((field) => field.name), ['Version', 'Environnement', 'Changelog']);
-  assert.match(embed.fields[2].value, /https:\/\/example\.com\/changelog/);
+  assert.deepEqual(embed.fields.map((field) => field.name), ['Version', 'Changelog']);
+  assert.match(embed.fields[1].value, /https:\/\/example\.com\/changelog/);
   assert.throws(() => customMessagePayload({ content: 'Test', imageUrl: 'http://example.com/image.png' }), /HTTPS/);
   assert.throws(() => customMessagePayload({ mode: 'changelog', title: 'Incomplet' }), /version, un titre et une description/);
   assert.equal(normalizeHexColor('#EF4444'), 0xef4444);

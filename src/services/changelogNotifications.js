@@ -114,7 +114,6 @@ function releasePayload(release, linkUrl = publicChangelogUrl()) {
     mode: 'changelog',
     content: '📰 **Nouveau changelog FyxBot**',
     version: release.version,
-    environment: 'production',
     title: release.title,
     description,
     color: '#ef4444',

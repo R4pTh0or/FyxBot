@@ -86,7 +86,7 @@
       "intro": "Une mise à jour majeure pour construire, configurer et animer une communauté depuis FyxBot.",
       "changes": [
         ["✉️", "Constructeur de messages", "Composez du texte, un embed, une image, une miniature et un bouton dans une seule publication."],
-        ["📰", "Modèle Changelog", "Reproduisez un format structuré avec titre, version, environnement et lien vers les détails."],
+        ["📰", "Modèle Changelog", "Reproduisez un format structuré avec titre, version et lien vers les détails."],
         ["👁️", "Aperçu Discord", "Vérifiez la mise en page, les couleurs et les visuels avant de publier dans le salon choisi."],
         ["⌨️", "Commandes Discord", "Utilisez /message envoyer ou /message changelog directement depuis Discord."],
         ["📡", "Diffusion automatique", "Le setup crée un salon changelog et FyxBot y annonce chaque nouvelle version ou correctif sans doublon."],

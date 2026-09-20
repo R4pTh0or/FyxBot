@@ -42,7 +42,6 @@ function customMessagePayload(input = {}) {
   const description = limitedText(input.description, 4096, 'La description');
   const footer = limitedText(input.footer, 2048, 'Le pied de page');
   const version = limitedText(input.version, 100, 'La version');
-  const environment = limitedText(input.environment, 100, 'L’environnement');
   const buttonLabel = limitedText(input.buttonLabel, 80, 'Le libellé du bouton');
   const imageUrl = optionalHttpsUrl(input.imageUrl, 'L’image');
   const thumbnailUrl = optionalHttpsUrl(input.thumbnailUrl, 'La miniature');
@@ -53,7 +52,7 @@ function customMessagePayload(input = {}) {
     throw new Error('Un changelog nécessite une version, un titre et une description.');
   }
 
-  const hasEmbed = Boolean(title || description || footer || imageUrl || thumbnailUrl || version || environment);
+  const hasEmbed = Boolean(title || description || footer || imageUrl || thumbnailUrl || version);
   if (!content && !hasEmbed) throw new Error('Ajoutez au moins du texte, un embed ou une image.');
   if (buttonLabel && !linkUrl) throw new Error('Ajoutez un lien HTTPS pour utiliser un bouton.');
 
@@ -71,7 +70,6 @@ function customMessagePayload(input = {}) {
     if (mode === 'changelog') {
       const fields = [
         { name: 'Version', value: version, inline: true },
-        { name: 'Environnement', value: environment || 'production', inline: true },
       ];
       if (linkUrl) fields.push({ name: 'Changelog', value: `[Consulter les détails](${linkUrl})`, inline: false });
       embed.addFields(fields).setTimestamp();
@@ -94,7 +92,7 @@ function publicMessagePayload(input = {}) {
   if (input.mode === 'changelog') {
     throw new Error('Le format changelog est réservé aux annonces automatiques officielles de FyxBot.');
   }
-  return customMessagePayload({ ...input, mode: 'message', version: '', environment: '' });
+  return customMessagePayload({ ...input, mode: 'message', version: '' });
 }
 
 module.exports = {

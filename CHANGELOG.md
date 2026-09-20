@@ -98,7 +98,7 @@ Les évolutions importantes de FyxBot sont documentées dans ce fichier et sur l
 ### Ajouté
 
 - Constructeur de messages dans le Control Center avec aperçu fidèle au rendu Discord.
-- Modèle Changelog avec version, environnement, lien et mise en forme en embed.
+- Modèle Changelog avec version, lien et mise en forme en embed.
 - Combinaison libre de texte, embed, grande image, miniature, couleur et bouton HTTPS.
 - Commandes `/message envoyer` et `/message changelog` pour publier directement depuis Discord.
 - Salon `🛠️・changelog` créé automatiquement pendant la configuration d’un serveur.

@@ -302,7 +302,7 @@ Publie dans le salon choisi un message composé de texte, d’un embed, d’une 
 
 ### `/message changelog`
 
-Publie une note de version structurée comme un changelog Discord avec titre, description, version, environnement, couleur, image et lien facultatifs.
+Publie une note de version structurée comme un changelog Discord avec titre, description, version, couleur, image et lien facultatifs.
 
 La permission **Gérer les messages** est requise. Les liens et les images doivent utiliser HTTPS. Les mêmes possibilités sont disponibles dans la section **Messages** du Control Center avec un aperçu avant envoi.
 

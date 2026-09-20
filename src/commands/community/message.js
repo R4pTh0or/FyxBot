@@ -30,7 +30,6 @@ module.exports = {
       .addStringOption((option) => option.setName('version').setDescription('Numéro de version, par exemple 1.2.0').setMaxLength(100).setRequired(true))
       .addStringOption((option) => option.setName('titre').setDescription('Titre de la mise à jour').setMaxLength(250).setRequired(true))
       .addStringOption((option) => option.setName('description').setDescription('Résumé des changements').setMaxLength(4000).setRequired(true))
-      .addStringOption((option) => option.setName('environnement').setDescription('Ex. production ou bêta').setMaxLength(100))
       .addStringOption((option) => option.setName('texte').setDescription('Texte affiché au-dessus de l’embed').setMaxLength(2000))
       .addStringOption((option) => option.setName('lien').setDescription('Lien HTTPS vers le changelog complet'))
       .addAttachmentOption((option) => option.setName('image').setDescription('Image jointe au changelog'))
@@ -50,7 +49,6 @@ module.exports = {
       linkUrl: interaction.options.getString('lien'),
       buttonLabel: mode === 'envoyer' ? interaction.options.getString('bouton') : null,
       version: mode === 'changelog' ? interaction.options.getString('version') : null,
-      environment: mode === 'changelog' ? interaction.options.getString('environnement') : null,
       footer: mode === 'changelog' ? 'FyxBot • Changelog' : 'FyxBot • Message personnalisé',
     });
     await channel.send(payload);
