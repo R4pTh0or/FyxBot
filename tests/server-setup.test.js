@@ -14,6 +14,7 @@ const {
   analyzeServerStructure,
   CATEGORY_DEFINITIONS,
   CHANNEL_DEFINITIONS,
+  manageablePermissionOverwrites,
   normalizedBlueprintName,
   permissionOverwritesMatch,
   permissionProfiles,
@@ -21,6 +22,7 @@ const {
   ROLE_DEFINITIONS,
   rulesTemplateForBlueprint,
   runtimeBlueprint,
+  syncPermissionOverwrites,
   synchronizedRolePermissionBits,
 } = require('../src/services/serverSetup');
 const { RULE_TEMPLATES } = require('../src/services/rules');
@@ -102,6 +104,61 @@ test('normalise les noms FyxBot et compare les permissions de catégorie', () =>
     deny: [PermissionFlagsBits.SendMessages],
   }]), true);
   assert.equal(permissionOverwritesMatch(channel, [{ id: 'everyone', allow: [PermissionFlagsBits.SendMessages] }]), false);
+});
+
+test('ignore et préserve les permissions des rôles placés au-dessus de FyxBot', async () => {
+  const everyone = { id: 'guild-a', editable: false };
+  const highRole = { id: 'role-high', name: '👑 Fondateur', editable: false };
+  const staffRole = { id: 'role-staff', name: '🆘 Support', editable: true };
+  const staleRole = { id: 'role-stale', name: 'Ancien rôle', editable: true };
+  const guild = {
+    id: 'guild-a',
+    members: { me: { id: 'bot-a' } },
+    roles: {
+      cache: new Collection([
+        [everyone.id, everyone],
+        [highRole.id, highRole],
+        [staffRole.id, staffRole],
+        [staleRole.id, staleRole],
+      ]),
+    },
+  };
+  const currentOverwrite = (id, allow = [], deny = []) => ({
+    id,
+    allow: new PermissionsBitField(allow),
+    deny: new PermissionsBitField(deny),
+  });
+  const current = new Collection([
+    [highRole.id, currentOverwrite(highRole.id, [PermissionFlagsBits.ViewChannel])],
+    [staleRole.id, currentOverwrite(staleRole.id, [PermissionFlagsBits.ViewChannel])],
+  ]);
+  const edits = [];
+  const deletions = [];
+  const channel = {
+    guild,
+    permissionOverwrites: {
+      cache: current,
+      edit: async (id, options, metadata) => edits.push({ id, options, metadata }),
+      delete: async (id) => deletions.push(id),
+    },
+  };
+  const desired = [
+    { id: everyone.id, deny: [PermissionFlagsBits.SendMessages] },
+    { id: highRole.id, allow: [PermissionFlagsBits.ManageMessages] },
+    { id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+    { id: 'bot-a', allow: [PermissionFlagsBits.ViewChannel] },
+  ];
+
+  assert.deepEqual(
+    manageablePermissionOverwrites(guild, desired).map((overwrite) => overwrite.id),
+    [everyone.id, staffRole.id, 'bot-a'],
+  );
+  assert.equal(permissionOverwritesMatch(channel, desired, guild), false);
+  assert.equal(await syncPermissionOverwrites(channel, desired, 'Test FyxBot'), true);
+  assert.deepEqual(edits.map((entry) => entry.id), [everyone.id, staffRole.id, 'bot-a']);
+  assert.equal(edits.every((entry) => entry.metadata.reason === 'Test FyxBot'), true);
+  assert.deepEqual(deletions, [staleRole.id]);
+  assert.equal(deletions.includes(highRole.id), false);
 });
 
 test('adapte automatiquement les permissions à ACCUEIL, aux membres vérifiés et au STAFF', () => {

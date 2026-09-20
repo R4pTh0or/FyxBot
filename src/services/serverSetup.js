@@ -1,5 +1,6 @@
 const {
   ChannelType,
+  OverwriteType,
   PermissionFlagsBits,
   PermissionsBitField,
 } = require('discord.js');
@@ -256,10 +257,63 @@ function desiredOverwriteSignature(overwrite) {
   return `${overwrite.id}:${permissionBits(overwrite.allow)}:${permissionBits(overwrite.deny)}`;
 }
 
-function permissionOverwritesMatch(channel, desired = []) {
-  const current = [...channel.permissionOverwrites.cache.values()].map(overwriteSignature).sort();
-  const expected = desired.map(desiredOverwriteSignature).sort();
+function overwriteTargetIsManageable(guild, overwriteId) {
+  if (overwriteId === guild.id || overwriteId === guild.members.me.id) return true;
+  const role = guild.roles.cache.get(overwriteId);
+  return role ? role.editable === true : false;
+}
+
+function permissionOverwritesMatch(channel, desired = [], guild = null) {
+  const currentValues = [...channel.permissionOverwrites.cache.values()];
+  const comparableCurrent = guild
+    ? currentValues.filter((overwrite) => overwriteTargetIsManageable(guild, overwrite.id))
+    : currentValues;
+  const comparableDesired = guild
+    ? desired.filter((overwrite) => overwriteTargetIsManageable(guild, overwrite.id))
+    : desired;
+  const current = comparableCurrent.map(overwriteSignature).sort();
+  const expected = comparableDesired.map(desiredOverwriteSignature).sort();
   return current.length === expected.length && current.every((value, index) => value === expected[index]);
+}
+
+function overwritePermissionOptions(overwrite) {
+  const allow = permissionBits(overwrite.allow);
+  const deny = permissionBits(overwrite.deny);
+  return Object.fromEntries(Object.entries(PermissionFlagsBits).map(([name, bit]) => [
+    name,
+    (allow & bit) === bit ? true : (deny & bit) === bit ? false : null,
+  ]));
+}
+
+function manageablePermissionOverwrites(guild, desired = []) {
+  return desired.filter((overwrite) => overwriteTargetIsManageable(guild, overwrite.id));
+}
+
+async function syncPermissionOverwrites(channel, desired = [], reason) {
+  const { guild } = channel;
+  const desiredById = new Map(desired.map((overwrite) => [overwrite.id, overwrite]));
+  let updated = false;
+
+  for (const overwrite of desired) {
+    if (!overwriteTargetIsManageable(guild, overwrite.id)) continue;
+    const current = channel.permissionOverwrites.cache.get(overwrite.id);
+    if (current && overwriteSignature(current) === desiredOverwriteSignature(overwrite)) continue;
+    const type = guild.roles.cache.has(overwrite.id) ? OverwriteType.Role : OverwriteType.Member;
+    await channel.permissionOverwrites.edit(
+      overwrite.id,
+      overwritePermissionOptions(overwrite),
+      { type, reason },
+    );
+    updated = true;
+  }
+
+  for (const current of channel.permissionOverwrites.cache.values()) {
+    if (desiredById.has(current.id) || !overwriteTargetIsManageable(guild, current.id)) continue;
+    await channel.permissionOverwrites.delete(current.id, reason);
+    updated = true;
+  }
+
+  return updated;
 }
 
 function findBlueprintItem(collection, name, predicate = () => true) {
@@ -302,7 +356,7 @@ async function findOrCreateCategory(guild, definition, overwrites, synchronizePe
     const createdCategory = await guild.channels.create({
       name: definition.name,
       type: ChannelType.GuildCategory,
-      permissionOverwrites: overwrites,
+      permissionOverwrites: manageablePermissionOverwrites(guild, overwrites),
       reason: 'Configuration adaptative FyxBot',
     });
     return { value: createdCategory, created: true, updated: false };
@@ -313,9 +367,12 @@ async function findOrCreateCategory(guild, definition, overwrites, synchronizePe
       await existing.setName(definition.name, 'Nom de catégorie FyxBot synchronisé');
       updated = true;
     }
-    if (!permissionOverwritesMatch(existing, overwrites)) {
-      await existing.permissionOverwrites.set(overwrites, 'Permissions de catégorie FyxBot synchronisées');
-      updated = true;
+    if (!permissionOverwritesMatch(existing, overwrites, guild)) {
+      updated = await syncPermissionOverwrites(
+        existing,
+        overwrites,
+        'Permissions de catégorie FyxBot synchronisées',
+      ) || updated;
     }
   }
   return { value: existing, created: false, updated };
@@ -337,7 +394,9 @@ async function findOrCreateChannel(guild, category, definition, profiles, synchr
       name: definition.name,
       type: expectedType,
       parent: category.id,
-      permissionOverwrites,
+      permissionOverwrites: permissionOverwrites
+        ? manageablePermissionOverwrites(guild, permissionOverwrites)
+        : undefined,
       topic: expectedType === ChannelType.GuildText ? definition.topic : undefined,
       reason: 'Configuration adaptative FyxBot',
     });
@@ -358,9 +417,12 @@ async function findOrCreateChannel(guild, category, definition, profiles, synchr
         await existing.lockPermissions();
         updated = true;
       }
-    } else if (!permissionOverwritesMatch(existing, permissionOverwrites)) {
-      await existing.permissionOverwrites.set(permissionOverwrites, 'Permissions du salon FyxBot synchronisées');
-      updated = true;
+    } else if (!permissionOverwritesMatch(existing, permissionOverwrites, guild)) {
+      updated = await syncPermissionOverwrites(
+        existing,
+        permissionOverwrites,
+        'Permissions du salon FyxBot synchronisées',
+      ) || updated;
     }
     if (expectedType === ChannelType.GuildText && definition.topic !== undefined && existing.topic !== definition.topic) {
       await existing.setTopic(definition.topic, 'Description du salon FyxBot synchronisée');
@@ -406,7 +468,7 @@ async function analyzeServerStructure(guild, fetched = {}, blueprint) {
   }
   for (const definition of desired.categories) {
     const existingCategory = categories[definition.key];
-    if (existingCategory && !permissionOverwritesMatch(existingCategory, profiles[definition.profile] || profiles.memberCommunity)) {
+    if (existingCategory && !permissionOverwritesMatch(existingCategory, profiles[definition.profile] || profiles.memberCommunity, guild)) {
       permissionIssues.push(`Catégorie ${definition.name}`);
     }
   }
@@ -422,7 +484,7 @@ async function analyzeServerStructure(guild, fetched = {}, blueprint) {
     }
     if (definition.profile === 'inherit') {
       if (existingChannel.permissionsLocked !== true) permissionIssues.push(`Salon ${definition.name}`);
-    } else if (!permissionOverwritesMatch(existingChannel, profiles[definition.profile] || profiles.memberCommunity)) {
+    } else if (!permissionOverwritesMatch(existingChannel, profiles[definition.profile] || profiles.memberCommunity, guild)) {
       permissionIssues.push(`Salon ${definition.name}`);
     }
   }
@@ -584,6 +646,7 @@ module.exports = {
   analyzeServerStructure,
   grantableRolePermissions,
   missingSetupPermissions,
+  manageablePermissionOverwrites,
   normalizedBlueprintName,
   permissionOverwritesMatch,
   permissionProfiles,
@@ -594,5 +657,6 @@ module.exports = {
   runtimeChannelProfile,
   runtimeBlueprint,
   setupServer,
+  syncPermissionOverwrites,
   synchronizedRolePermissionBits,
 };
