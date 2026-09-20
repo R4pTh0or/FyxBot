@@ -263,13 +263,36 @@ function overwriteTargetIsManageable(guild, overwriteId) {
   return role ? role.editable === true : false;
 }
 
+function overwriteHasProtectedPermissions(guild, overwrite) {
+  if (!overwrite) return false;
+  const protectedBits = (overwrite.allow.bitfield | overwrite.deny.bitfield)
+    & ~guild.members.me.permissions.bitfield;
+  return protectedBits !== 0n;
+}
+
+function overwriteIsSafelyEditable(channel, guild, overwriteId) {
+  if (!overwriteTargetIsManageable(guild, overwriteId)) return false;
+  return !overwriteHasProtectedPermissions(guild, channel.permissionOverwrites.cache.get(overwriteId));
+}
+
+function grantablePermissionOverwrite(guild, overwrite) {
+  const botPermissions = guild.members.me.permissions;
+  return {
+    ...overwrite,
+    allow: (overwrite.allow || []).filter((permission) => botPermissions.has(permission)),
+    deny: (overwrite.deny || []).filter((permission) => botPermissions.has(permission)),
+  };
+}
+
 function permissionOverwritesMatch(channel, desired = [], guild = null) {
   const currentValues = [...channel.permissionOverwrites.cache.values()];
   const comparableCurrent = guild
-    ? currentValues.filter((overwrite) => overwriteTargetIsManageable(guild, overwrite.id))
+    ? currentValues.filter((overwrite) => overwriteIsSafelyEditable(channel, guild, overwrite.id))
     : currentValues;
   const comparableDesired = guild
-    ? desired.filter((overwrite) => overwriteTargetIsManageable(guild, overwrite.id))
+    ? desired
+      .filter((overwrite) => overwriteIsSafelyEditable(channel, guild, overwrite.id))
+      .map((overwrite) => grantablePermissionOverwrite(guild, overwrite))
     : desired;
   const current = comparableCurrent.map(overwriteSignature).sort();
   const expected = comparableDesired.map(desiredOverwriteSignature).sort();
@@ -286,7 +309,9 @@ function overwritePermissionOptions(overwrite) {
 }
 
 function manageablePermissionOverwrites(guild, desired = []) {
-  return desired.filter((overwrite) => overwriteTargetIsManageable(guild, overwrite.id));
+  return desired
+    .filter((overwrite) => overwriteTargetIsManageable(guild, overwrite.id))
+    .map((overwrite) => grantablePermissionOverwrite(guild, overwrite));
 }
 
 async function syncPermissionOverwrites(channel, desired = [], reason) {
@@ -295,20 +320,21 @@ async function syncPermissionOverwrites(channel, desired = [], reason) {
   let updated = false;
 
   for (const overwrite of desired) {
-    if (!overwriteTargetIsManageable(guild, overwrite.id)) continue;
+    if (!overwriteIsSafelyEditable(channel, guild, overwrite.id)) continue;
+    const grantableOverwrite = grantablePermissionOverwrite(guild, overwrite);
     const current = channel.permissionOverwrites.cache.get(overwrite.id);
-    if (current && overwriteSignature(current) === desiredOverwriteSignature(overwrite)) continue;
+    if (current && overwriteSignature(current) === desiredOverwriteSignature(grantableOverwrite)) continue;
     const type = guild.roles.cache.has(overwrite.id) ? OverwriteType.Role : OverwriteType.Member;
     await channel.permissionOverwrites.edit(
       overwrite.id,
-      overwritePermissionOptions(overwrite),
+      overwritePermissionOptions(grantableOverwrite),
       { type, reason },
     );
     updated = true;
   }
 
   for (const current of channel.permissionOverwrites.cache.values()) {
-    if (desiredById.has(current.id) || !overwriteTargetIsManageable(guild, current.id)) continue;
+    if (desiredById.has(current.id) || !overwriteIsSafelyEditable(channel, guild, current.id)) continue;
     await channel.permissionOverwrites.delete(current.id, reason);
     updated = true;
   }

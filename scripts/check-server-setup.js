@@ -45,13 +45,17 @@ async function main() {
     const fullGuild = await guild.fetch();
     const botMember = fullGuild.members.me;
     if (permissionsOnly) {
-      const channels = await fullGuild.channels.fetch();
+      const [channels, roles] = await Promise.all([
+        fullGuild.channels.fetch(),
+        fullGuild.roles.fetch(),
+      ]);
       const visibleChannels = [...channels.values()]
         .filter(Boolean)
         .sort((left, right) => left.rawPosition - right.rawPosition)
         .map((channel) => {
           const permissions = channel.permissionsFor(botMember);
           return {
+            id: channel.id,
             name: channel.name,
             type: channel.type,
             view: permissions?.has('ViewChannel') || false,
@@ -59,7 +63,17 @@ async function main() {
             embedLinks: permissions?.has('EmbedLinks') || false,
             attachFiles: permissions?.has('AttachFiles') || false,
             sendPolls: permissions?.has('SendPolls') || false,
+            manageMessages: permissions?.has('ManageMessages') || false,
+            manageRoles: permissions?.has('ManageRoles') || false,
             manageChannels: permissions?.has('ManageChannels') || false,
+            overwrites: channel.type === 4
+              ? [...channel.permissionOverwrites.cache.values()].map((overwrite) => ({
+                id: overwrite.id,
+                type: overwrite.type,
+                allow: overwrite.allow.toArray().sort(),
+                deny: overwrite.deny.toArray().sort(),
+              }))
+              : undefined,
           };
         });
       console.log(JSON.stringify({
@@ -67,10 +81,21 @@ async function main() {
         bot: {
           highestRole: botMember.roles.highest.name,
           highestRolePosition: botMember.roles.highest.position,
+          permissions: botMember.permissions.toArray().sort(),
           administrator: botMember.permissions.has('Administrator'),
           manageRoles: botMember.permissions.has('ManageRoles'),
           manageChannels: botMember.permissions.has('ManageChannels'),
         },
+        roles: [...roles.values()]
+          .filter((role) => role.id !== fullGuild.id && !role.managed)
+          .sort((left, right) => right.position - left.position)
+          .map((role) => ({
+            id: role.id,
+            name: role.name,
+            position: role.position,
+            editable: role.editable,
+            permissions: role.permissions.toArray().sort(),
+          })),
         channels: visibleChannels,
       }, null, 2));
       return;
@@ -84,6 +109,7 @@ async function main() {
         && normalizedBlueprintName(item.name) === normalizedBlueprintName(definition.name));
       if (!role) return { name: definition.name, found: false };
       return {
+        id: role.id,
         name: role.name,
         found: true,
         position: role.position,
@@ -106,6 +132,7 @@ async function main() {
       bot: {
         highestRole: botMember.roles.highest.name,
         highestRolePosition: botMember.roles.highest.position,
+        permissions: botMember.permissions.toArray().sort(),
         administrator: botMember.permissions.has('Administrator'),
         manageRoles: botMember.permissions.has('ManageRoles'),
         manageChannels: botMember.permissions.has('ManageChannels'),
