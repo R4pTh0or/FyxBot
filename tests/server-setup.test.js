@@ -12,6 +12,7 @@ const { buildAdaptiveBlueprint } = require('../src/services/adaptiveServerBluepr
 const { remapConfigurationIds } = require('../src/services/serverBackup');
 const {
   analyzeServerStructure,
+  blueprintNamesMatch,
   CATEGORY_DEFINITIONS,
   CHANNEL_DEFINITIONS,
   findManageableChannelCandidate,
@@ -19,6 +20,7 @@ const {
   normalizedBlueprintName,
   permissionOverwritesMatch,
   permissionProfiles,
+  protectedSetupConflicts,
   resolveMemberAccessRole,
   ROLE_DEFINITIONS,
   rulesTemplateForBlueprint,
@@ -106,6 +108,13 @@ test('normalise les noms FyxBot et compare les permissions de catégorie', () =>
     deny: [PermissionFlagsBits.SendMessages],
   }]), true);
   assert.equal(permissionOverwritesMatch(channel, [{ id: 'everyone', allow: [PermissionFlagsBits.SendMessages] }]), false);
+});
+
+test('reconnaît le nom du serveur comme préfixe sans créer une seconde catégorie', () => {
+  const guild = { name: 'FyxBot' };
+  assert.equal(blueprintNamesMatch(guild, '🔐 FYXBOT STAFF', '🔐 STAFF'), true);
+  assert.equal(blueprintNamesMatch(guild, '💭・général', '💬・general'), true);
+  assert.equal(blueprintNamesMatch(guild, '🎫 SUPPORT', '🔐 STAFF'), false);
 });
 
 test('ignore et préserve les permissions des rôles placés au-dessus de FyxBot', async () => {
@@ -265,6 +274,34 @@ test('préserve un salon privé inaccessible et sélectionne uniquement un salon
     ),
     manageable,
   );
+});
+
+test('bloque la synchronisation avant création quand un équivalent est protégé', () => {
+  const guild = {
+    name: 'FyxBot',
+    members: { me: { id: 'bot-a' } },
+    channels: {
+      cache: new Collection([
+        ['staff', {
+          id: 'staff',
+          name: '🔐 FYXBOT STAFF',
+          type: 4,
+          permissionsFor: () => new PermissionsBitField([PermissionFlagsBits.ViewChannel]),
+        }],
+        ['rules', {
+          id: 'rules',
+          name: '📜・règlement',
+          type: 0,
+          permissionsFor: () => new PermissionsBitField([PermissionFlagsBits.ViewChannel]),
+        }],
+      ]),
+    },
+  };
+  const conflicts = protectedSetupConflicts(guild, {
+    categories: [{ key: 'staff', name: '🔐 STAFF' }],
+    channels: [{ key: 'rules', name: '📜・reglement', type: 'text' }],
+  });
+  assert.deepEqual(conflicts, ['Catégorie 🔐 STAFF', 'Salon 📜・reglement']);
 });
 
 test('adapte automatiquement les permissions à ACCUEIL, aux membres vérifiés et au STAFF', () => {

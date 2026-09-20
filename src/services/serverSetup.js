@@ -107,6 +107,22 @@ function normalizedBlueprintName(name) {
     .toLocaleLowerCase('fr');
 }
 
+function blueprintNamesMatch(guild, existingName, expectedName) {
+  const comparableName = (value) => normalizedBlueprintName(value)
+    .normalize('NFD')
+    .replace(/\p{Mark}/gu, '');
+  const existing = comparableName(existingName);
+  const expected = comparableName(expectedName);
+  if (existing === expected) return true;
+
+  const guildName = comparableName(guild?.name);
+  if (!guildName) return false;
+  const withoutGuildPrefix = (value) => value.startsWith(`${guildName} `)
+    ? value.slice(guildName.length).trim()
+    : value;
+  return withoutGuildPrefix(existing) === withoutGuildPrefix(expected);
+}
+
 function grantableRolePermissions(guild, requested, fallback = requested) {
   const botPermissions = guild.members.me.permissions;
   const desired = requested.includes(PermissionFlagsBits.Administrator)
@@ -360,9 +376,9 @@ async function syncInheritedPermissionOverwrites(channel, category, reason) {
   );
 }
 
-function findBlueprintItem(collection, name, predicate = () => true) {
-  const normalized = normalizedBlueprintName(name);
-  return collection.find((item) => predicate(item) && normalizedBlueprintName(item.name) === normalized) || null;
+function findBlueprintItem(collection, name, predicate = () => true, guild = null) {
+  return collection.find((item) => predicate(item)
+    && blueprintNamesMatch(guild, item.name, name)) || null;
 }
 
 async function findOrCreateRole(guild, definition, synchronizePermissions) {
@@ -395,7 +411,12 @@ async function findOrCreateRole(guild, definition, synchronizePermissions) {
 }
 
 async function findOrCreateCategory(guild, definition, overwrites, synchronizePermissions) {
-  const existing = findBlueprintItem(guild.channels.cache, definition.name, (channel) => channel.type === ChannelType.GuildCategory);
+  const existing = findBlueprintItem(
+    guild.channels.cache,
+    definition.name,
+    (channel) => channel.type === ChannelType.GuildCategory,
+    guild,
+  );
   if (!existing) {
     const createdCategory = await guild.channels.create({
       name: definition.name,
@@ -441,7 +462,7 @@ function findManageableChannelCandidate(guild, candidates, categoryId) {
 async function findOrCreateChannel(guild, category, definition, profiles, synchronizePermissions) {
   const expectedType = discordChannelType(definition);
   const candidates = guild.channels.cache.filter((channel) => channel.type === expectedType
-    && normalizedBlueprintName(channel.name) === normalizedBlueprintName(definition.name));
+    && blueprintNamesMatch(guild, channel.name, definition.name));
   const existing = findManageableChannelCandidate(guild, candidates, category.id);
   const permissionOverwrites = definition.profile === 'inherit' ? undefined : profiles[definition.profile];
   if (!existing) {
@@ -488,6 +509,26 @@ async function findOrCreateChannel(guild, category, definition, profiles, synchr
   return { value: existing, created: false, updated };
 }
 
+function protectedSetupConflicts(guild, desired) {
+  const conflicts = [];
+  for (const definition of desired.categories) {
+    const matches = guild.channels.cache.filter((channel) => channel.type === ChannelType.GuildCategory
+      && blueprintNamesMatch(guild, channel.name, definition.name));
+    if (matches.size > 0 && !matches.some((channel) => botCanManageChannel(guild, channel))) {
+      conflicts.push(`Catégorie ${definition.name}`);
+    }
+  }
+  for (const definition of desired.channels) {
+    const expectedType = discordChannelType(definition);
+    const matches = guild.channels.cache.filter((channel) => channel.type === expectedType
+      && blueprintNamesMatch(guild, channel.name, definition.name));
+    if (matches.size > 0 && !matches.some((channel) => botCanManageChannel(guild, channel))) {
+      conflicts.push(`Salon ${definition.name}`);
+    }
+  }
+  return conflicts;
+}
+
 function desiredRolesFromGuild(guild, definitions) {
   return Object.fromEntries(definitions.map((definition) => [
     definition.key,
@@ -504,7 +545,12 @@ async function analyzeServerStructure(guild, fetched = {}, blueprint) {
   const profiles = permissionProfiles(guild, roles, desired.roles, memberAccessRole);
   const categories = Object.fromEntries(desired.categories.map((definition) => [
     definition.key,
-    findBlueprintItem(guild.channels.cache, definition.name, (channel) => channel.type === ChannelType.GuildCategory),
+    findBlueprintItem(
+      guild.channels.cache,
+      definition.name,
+      (channel) => channel.type === ChannelType.GuildCategory,
+      guild,
+    ),
   ]));
   const missingRoles = desired.roles.filter((definition) => !roles[definition.key]).map((definition) => definition.name);
   const missingCategories = desired.categories.filter((definition) => !categories[definition.key]).map((definition) => definition.name);
@@ -524,20 +570,23 @@ async function analyzeServerStructure(guild, fetched = {}, blueprint) {
   }
   for (const definition of desired.categories) {
     const existingCategory = categories[definition.key];
-    if (existingCategory && !permissionOverwritesMatch(existingCategory, profiles[definition.profile] || profiles.memberCommunity, guild)) {
+    if (existingCategory && botCanManageChannel(guild, existingCategory)
+      && !permissionOverwritesMatch(existingCategory, profiles[definition.profile] || profiles.memberCommunity, guild)) {
       permissionIssues.push(`Catégorie ${definition.name}`);
     }
   }
   for (const definition of desired.channels) {
     const targetCategory = categories[definition.category];
     const matches = guild.channels.cache.filter((existingChannel) => existingChannel.type === discordChannelType(definition)
-      && normalizedBlueprintName(existingChannel.name) === normalizedBlueprintName(definition.name));
+      && blueprintNamesMatch(guild, existingChannel.name, definition.name));
     const manageableMatches = matches.filter((channel) => botCanManageChannel(guild, channel));
     const existingChannel = targetCategory
       ? manageableMatches.find((item) => item.parentId === targetCategory.id)
       : null;
     if (!existingChannel) {
-      if (manageableMatches.size > 0) misplacedChannels.push(definition.name);
+      if (matches.size > 0 && manageableMatches.size === 0) {
+        permissionIssues.push(`Salon ${definition.name} — donnez à FyxBot l’accès Voir le salon et Gérer les salons`);
+      } else if (manageableMatches.size > 0) misplacedChannels.push(definition.name);
       else missingChannels.push(definition.name);
       continue;
     }
@@ -553,14 +602,14 @@ async function analyzeServerStructure(guild, fetched = {}, blueprint) {
   }
 
   const targetRoleNames = new Set(desired.roles.map((definition) => normalizedBlueprintName(definition.name)));
-  const targetCategoryNames = new Set(desired.categories.map((definition) => normalizedBlueprintName(definition.name)));
-  const targetChannelNames = new Set(desired.channels.map((definition) => normalizedBlueprintName(definition.name)));
+  const targetCategoryNames = desired.categories.map((definition) => definition.name);
+  const targetChannelNames = desired.channels.map((definition) => definition.name);
   const extraRoles = guild.roles.cache.filter((existingRole) => existingRole.id !== guild.id && !existingRole.managed
     && !targetRoleNames.has(normalizedBlueprintName(existingRole.name))).map((existingRole) => existingRole.name);
   const extraCategories = guild.channels.cache.filter((existingChannel) => existingChannel.type === ChannelType.GuildCategory
-    && !targetCategoryNames.has(normalizedBlueprintName(existingChannel.name))).map((existingChannel) => existingChannel.name);
+    && !targetCategoryNames.some((name) => blueprintNamesMatch(guild, existingChannel.name, name))).map((existingChannel) => existingChannel.name);
   const extraChannels = guild.channels.cache.filter((existingChannel) => existingChannel.type !== ChannelType.GuildCategory && !existingChannel.isThread?.()
-    && !targetChannelNames.has(normalizedBlueprintName(existingChannel.name))).map((existingChannel) => existingChannel.name);
+    && !targetChannelNames.some((name) => blueprintNamesMatch(guild, existingChannel.name, name))).map((existingChannel) => existingChannel.name);
   const missingCount = missingRoles.length + missingCategories.length + missingChannels.length + misplacedChannels.length;
   const recommendation = missingCount > 0
     ? 'complete'
@@ -601,6 +650,10 @@ async function setupServer(guild, options = {}) {
   const missingPermissions = missingSetupPermissions(guild);
   if (missingPermissions.length > 0) throw new Error('FyxBot nécessite les permissions Gérer les rôles et Gérer les salons pour configurer le serveur.');
   await Promise.all([guild.roles.fetch(), guild.channels.fetch()]);
+  const accessConflicts = protectedSetupConflicts(guild, desired);
+  if (accessConflicts.length > 0) {
+    throw new Error(`FyxBot a trouvé des éléments équivalents mais protégés : ${accessConflicts.join(', ')}. Accordez-lui les permissions Voir le salon et Gérer les salons sur ces éléments, puis relancez la synchronisation. Aucun doublon n'a été créé.`);
+  }
 
   const roleResults = {};
   for (const definition of desired.roles) roleResults[definition.key] = await findOrCreateRole(guild, definition, synchronizePermissions);
@@ -701,6 +754,7 @@ async function resetServer(guild, options = {}) {
 }
 
 module.exports = {
+  blueprintNamesMatch,
   CATEGORY_DEFINITIONS,
   CHANNEL_DEFINITIONS,
   DEFAULT_BLUEPRINT,
@@ -714,6 +768,7 @@ module.exports = {
   normalizedBlueprintName,
   permissionOverwritesMatch,
   permissionProfiles,
+  protectedSetupConflicts,
   resolveMemberAccessRole,
   resetServer,
   rulesTemplateForBlueprint,
