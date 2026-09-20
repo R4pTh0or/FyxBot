@@ -224,7 +224,7 @@ test("conserve les protections essentielles du panel", async () => {
   assert.equal(changelogRoute?.revalidate, 30);
   assert.equal(changelogRoute?.expire, 60);
   const release = JSON.parse(releaseSource);
-  assert.equal(release.currentVersion, "1.5.0");
+  assert.equal(release.currentVersion, "2.0.0");
   assert.equal(release.status, "available");
   assert.deepEqual(JSON.parse(releasePublic), release);
 });

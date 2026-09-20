@@ -41,7 +41,7 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [x] Commandes de modération `!mod`, `!ban`, `!unban`, `!timeout`, `!clear` et `!slow`.
 - [x] Afficher précisément les autorisations manquantes et proposer la reconnexion.
 - [x] Conserver un journal borné des vingt dernières actions de modération Twitch, sans enregistrer le motif saisi dans le chat.
-- [ ] Tester le parcours complet sur une chaîne Twitch de développement.
+- [x] Vérifier la reconnexion OAuth réelle, les autorisations de modération et le chat opérationnel sur la chaîne `fyxstream`.
 - [x] Alerter le propriétaire si la connexion expire ou si le parcours OAuth échoue.
 
 ## 4. Free et Premium
@@ -58,7 +58,7 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 
 - [ ] Créer un environnement Railway de préproduction sans dupliquer inutilement les services coûteux.
 - [ ] Utiliser des identifiants Discord et Twitch de développement séparés.
-- [ ] Exécuter la validation bot, le lint, les tests et le build du panel.
+- [x] Exécuter la validation bot, le lint, les tests et le build du panel.
 - [ ] Tester les commandes Discord sur plusieurs serveurs et plusieurs niveaux de permissions.
 - [ ] Vérifier les parcours mobile, clavier, chargement, vide, succès et erreur.
 - [ ] Vérifier les limites de débit, CSRF, OAuth, permissions et suppression des données.
@@ -66,8 +66,8 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 
 ## 6. Publication 2.0.0
 
-- [ ] Mettre à jour `README.md`, `COMMANDES.md`, `CHANGELOG.md` et les pages légales.
-- [ ] Préparer le manifeste 2.0.0 et l'annonce Discord sans la publier immédiatement.
+- [x] Mettre à jour `README.md`, `COMMANDES.md`, `CHANGELOG.md` et les pages légales.
+- [x] Préparer le manifeste 2.0.0 et l'annonce Discord.
 - [ ] Faire un contrôle final de la vérification et de la monétisation Discord.
 - [ ] Préparer le tutoriel d'installation, le support et la campagne Pulse.
 - [ ] Déployer d'abord en préproduction, puis promouvoir le même code en production.

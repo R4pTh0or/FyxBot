@@ -2,38 +2,35 @@
 
 Les évolutions importantes de FyxBot sont documentées dans ce fichier et sur la page publique `/changelog`.
 
-## V2 — Chantier local, non publié
+## [2.0.0] — 20 septembre 2026
 
-### Stabilisation de la future version 2.0.0
+### Control Center V2 et FyxPilot Studio
 
-- Documentation alignée sur la version 1.5.0 et checklist V2 centralisée dans `docs/V2-READINESS.md`.
-- Données de test isolées dans un dossier temporaire afin qu'une validation locale ne lise ou ne modifie jamais la base de développement.
-- Validation locale complète : syntaxe, types, 284 tests bot, lint, build et 5 tests panel.
-- FyxPilot Studio affiche maintenant les ajouts, corrections, éléments conservés et suppressions exactes avant application, avec une projection adaptée à l'action choisie.
-- Les brouillons, l'historique avec auteur et le retour arrière guidé sont intégrés au parcours FyxPilot.
-- Un aperçu des permissions finales détaille l'accès de chaque rôle aux catégories et signale les exceptions propres à certains salons.
-- Préproduction, exercice réel de restauration R2 et période de stabilité requis avant toute annonce 2.0.0.
+- Nouvelle interface publique avec navigation réorganisée, vue d’ensemble actionnable, recherche, alertes et espace FyxStream distinct.
+- L’espace Créateur reste invisible et inaccessible aux utilisateurs non autorisés.
+- FyxPilot affiche les ajouts, corrections, éléments conservés et suppressions exactes avant application.
+- Brouillons, historique avec auteur, retour arrière guidé et aperçu des permissions finales par rôle, catégorie et exception de salon.
 
 ### FyxStream intégré
 
-- Regroupement des fonctions Twitch dans FyxBot, sans service ou domaine FyxStream séparé.
-- Connexion OAuth, chat IRC, commandes personnalisées, protections et réception sécurisée des événements Twitch.
+- Connexion OAuth Twitch, jetons chiffrés, chat IRC, commandes personnalisées, protections et événements Twitch intégrés à FyxBot.
 - Commandes de modération `!mod`, `!ban`, `!unban`, `!timeout`, `!clear` et `!slow`.
-- Les connexions antérieures aux nouvelles autorisations de modération doivent être reconnectées une fois depuis le panel.
-- Le panel affiche précisément les autorisations Twitch manquantes et propose une reconnexion directe.
-- Les échecs et expirations OAuth sont expliqués dans FyxStream au retour de Twitch.
-- Les vingt dernières actions de modération Twitch sont visibles dans un journal borné ; les motifs saisis dans le chat ne sont pas conservés dans cet historique.
-- Le test réel sur une chaîne Twitch de développement reste nécessaire avant de déclarer la V2 terminée.
+- Reconnexion guidée lorsque des autorisations manquent ou expirent, avec détail des permissions nécessaires.
+- Journal borné aux vingt dernières actions de modération, sans conservation des motifs saisis dans le chat.
 
 ### Premium partenaire
 
-- Le propriétaire peut attribuer depuis l’espace Créateur un accès Premium offert, limité dans le temps ou sans échéance.
-- Le bénéficiaire peut appliquer ce droit à plusieurs serveurs qu’il administre, sans moyen de paiement ni abonnement.
-- La révocation retire immédiatement ce droit lorsque aucun autre accès Premium n’est actif, sans supprimer les réglages existants.
-- L’historique conserve le bénéficiaire, le motif, l’auteur, les dates d’attribution, d’expiration et de révocation.
-- Une migration PostgreSQL V2 idempotente prépare la nouvelle table avant tout futur déploiement.
+- Le propriétaire peut offrir un accès Premium temporaire ou permanent depuis l’espace Créateur.
+- Un bénéficiaire peut appliquer son accès à plusieurs serveurs administrés, sans carte ni abonnement automatique.
+- Attribution, expiration et révocation sont historisées ; la révocation conserve les réglages existants.
+- Migration PostgreSQL V2 idempotente disponible pour les installations utilisant ce moteur ; la production actuelle conserve son volume SQLite.
 
-Cette section décrit des changements locaux non publiés. La version publique reste celle indiquée par le manifeste de publication.
+### Qualité et sécurité
+
+- Données de test isolées afin que la validation locale ne lise ou ne modifie jamais la base de développement.
+- OAuth, contrôles d’accès, protection CSRF, limites de débit, sauvegardes chiffrées et journalisation structurée renforcés.
+- Validation complète : syntaxe, types, 284 tests bot, lint, build et 5 tests panel.
+- Les tarifs définitifs et le cycle payant complet des SKU Discord restent volontairement hors de cette release.
 
 ## [1.5.0] — 28 août 2026
 

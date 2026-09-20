@@ -2,7 +2,7 @@
 
 Bot Discord multifonction construit avec Node.js et discord.js v14. FyxBot fournit les utilitaires membres/serveur, la modération, les tickets privés avec transcripts, les logs, les suggestions, l’accueil, les rôles, AutoMod, les règlements interactifs, les anniversaires volontaires, les notifications sociales, les salons vocaux temporaires, les événements Discord programmés, les concours automatiques et un constructeur de messages Discord avec texte, embeds et images.
 
-Le suivi consolidé des éléments terminés et des prochaines priorités se trouve dans [ETAT-PROJET.md](ETAT-PROJET.md). Les critères nécessaires avant d'annoncer la version 2.0.0 sont suivis dans [docs/V2-READINESS.md](docs/V2-READINESS.md).
+La version publique actuelle est **FyxBot 2.0.0**. Le suivi consolidé des éléments terminés et des prochaines priorités se trouve dans [ETAT-PROJET.md](ETAT-PROJET.md). Les contrôles post-publication sont suivis dans [docs/V2-READINESS.md](docs/V2-READINESS.md).
 
 ## Configuration adaptative du serveur
 

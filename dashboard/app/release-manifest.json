@@ -1,12 +1,30 @@
 {
   "schemaVersion": 1,
   "product": "FyxBot",
-  "currentVersion": "1.5.0",
+  "currentVersion": "2.0.0",
   "status": "available",
   "statusLabel": "Disponible",
-  "releasedAt": "2026-08-28T00:00:00+02:00",
+  "releasedAt": "2026-09-20T00:00:00+02:00",
   "changelogPath": "/changelog",
   "releases": [
+    {
+      "version": "2.0.0",
+      "dateLabel": "20 septembre 2026",
+      "releasedAt": "2026-09-20T00:00:00+02:00",
+      "status": "available",
+      "statusLabel": "Disponible",
+      "title": "FyxBot V2 réunit Discord et Twitch",
+      "intro": "Le nouveau Control Center rassemble la création guidée de serveurs, le pilotage Discord et FyxStream dans une interface plus claire, sécurisée et accessible.",
+      "changes": [
+        ["🧭", "FyxPilot Studio", "Décrivez votre serveur, comparez les ajouts, corrections et suppressions, vérifiez les permissions puis appliquez ou restaurez la structure avec un historique clair."],
+        ["🎛️", "Control Center V2", "Une navigation réorganisée, une vue d’ensemble actionnable, des alertes centralisées et des états de chargement ou d’erreur plus lisibles."],
+        ["🟣", "FyxStream intégré", "Reliez Twitch à un serveur Discord, animez le chat, configurez les protections et utilisez les commandes de modération depuis le même produit FyxBot."],
+        ["💎", "Premium partenaire", "Le propriétaire peut offrir un accès Premium temporaire ou permanent, applicable à plusieurs serveurs et entièrement traçable dans l’espace Créateur."],
+        ["🔐", "Sécurité renforcée", "OAuth, contrôles d’accès, protection CSRF, limites de débit, jetons Twitch chiffrés et sauvegardes protégées sécurisent les parcours sensibles."],
+        ["📱", "Interface plus accessible", "Le panel conserve la direction artistique sombre rouge et orange tout en améliorant la lisibilité, le clavier et l’adaptation aux différentes tailles d’écran."],
+        ["✅", "Qualité vérifiée", "La release est couverte par 284 tests bot et 5 tests panel, avec syntaxe, types, lint et build validés avant publication."]
+      ]
+    },
     {
       "version": "1.5.0",
       "dateLabel": "28 août 2026",

@@ -1,6 +1,6 @@
 # État du projet FyxBot
 
-Dernière consolidation locale : **19 septembre 2026**.
+Dernière consolidation et publication : **20 septembre 2026**.
 
 Ce document décrit l'état fonctionnel du code présent dans `C:\Fyxbot`. Les
 identifiants de déploiement Railway ne sont plus figés ici : ils changent à
@@ -9,13 +9,13 @@ annonce publique.
 
 ## Version actuelle
 
-- Version applicative : **1.5.0**.
+- Version applicative : **2.0.0**.
 - Site public : <https://fyxbot-panel-production.up.railway.app/>.
 - Services Railway : `fyxbot-bot` et `fyxbot-panel`.
 - Commandes Discord présentes dans le code : **34**.
 - Manifeste partagé par le bot, le panel et le changelog :
   `dashboard/app/release-manifest.json`.
-- La prochaine version majeure est suivie dans
+- Le suivi post-publication de la V2 est conservé dans
   [docs/V2-READINESS.md](docs/V2-READINESS.md).
 
 ## Fonctionnalités disponibles
@@ -85,7 +85,7 @@ annonce publique.
   serveur.
 - Journalisation structurée avec Pino.
 
-## Travail restant avant la V2
+## Suivi après la publication V2
 
 ### Priorité 1 — stabilisation
 
@@ -96,8 +96,9 @@ annonce publique.
 - [x] `C:\Fyxbot` est relié à l'historique GitHub sur la branche locale
   `v2-development-2026-09-19`. Le dépôt vide imbriqué dans `dashboard` a été
   conservé dans `.safety` et aucun envoi GitHub n'a été effectué.
-- [ ] Vérifier en lecture seule le moteur de stockage réellement actif en
-  production et l'état courant des deux services Railway.
+- [x] Vérifier en lecture seule le moteur de stockage réellement actif en
+  production et l'état courant des deux services Railway : volume SQLite actif,
+  bot et panel sains lors de la publication.
 - [ ] Effectuer un exercice réel de restauration R2 vers une destination
   isolée, sans écraser la production.
 
@@ -114,7 +115,9 @@ annonce publique.
 - [x] Reconnexion guidée lorsque des autorisations Twitch manquent.
 - [x] Historique borné des actions de modération.
 - [x] Alerte en cas d'expiration ou d'échec OAuth.
-- [ ] Validation réelle sur une chaîne de développement.
+- [x] Reconnexion OAuth réelle et chat opérationnel vérifiés sur la chaîne
+  `fyxstream` ; les actions de modération destructrices ne sont pas exécutées
+  sans cible de test dédiée.
 
 ### Priorité 4 — Premium et publication
 
@@ -122,8 +125,8 @@ annonce publique.
 - Tester les SKU Discord de bout en bout.
 - [x] Ajouter les accès gratuits propriétaire/partenaire avec historique d'audit.
 - Créer une préproduction Railway distincte après accord sur son coût.
-- Passer une période de stabilité de sept jours avant l'annonce 2.0.0.
-- Préparer le changelog, le tutoriel et la campagne Pulse.
+- Surveiller la stabilité de la version 2.0.0 après publication.
+- Préparer le tutoriel et la campagne Pulse.
 
 ## Conservé volontairement
 
