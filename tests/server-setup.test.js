@@ -22,6 +22,7 @@ const {
   ROLE_DEFINITIONS,
   rulesTemplateForBlueprint,
   runtimeBlueprint,
+  syncInheritedPermissionOverwrites,
   syncPermissionOverwrites,
   synchronizedRolePermissionBits,
 } = require('../src/services/serverSetup');
@@ -177,6 +178,62 @@ test('ignore et préserve les permissions des rôles placés au-dessus de FyxBot
   assert.equal(deletions.includes(highRole.id), false);
   assert.equal(edits.some((entry) => entry.id === protectedRole.id), false);
   assert.equal(deletions.includes(protectedRole.id), false);
+});
+
+test('hérite des permissions de catégorie sans remplacer les droits protégés', async () => {
+  const everyone = { id: 'guild-a', editable: false };
+  const administrator = { id: 'role-admin', editable: true };
+  const guild = {
+    id: everyone.id,
+    members: {
+      me: {
+        id: 'bot-a',
+        permissions: new PermissionsBitField([
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.SendMessages,
+        ]),
+      },
+    },
+    roles: { cache: new Collection([[everyone.id, everyone], [administrator.id, administrator]]) },
+  };
+  const currentOverwrite = (id, allow = [], deny = []) => ({
+    id,
+    type: 0,
+    allow: new PermissionsBitField(allow),
+    deny: new PermissionsBitField(deny),
+  });
+  const category = {
+    permissionOverwrites: {
+      cache: new Collection([
+        [everyone.id, currentOverwrite(everyone.id, [], [PermissionFlagsBits.SendMessages])],
+        [administrator.id, currentOverwrite(administrator.id, [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.PinMessages,
+        ])],
+      ]),
+    },
+  };
+  const edits = [];
+  const channel = {
+    guild,
+    permissionsLocked: false,
+    permissionOverwrites: {
+      cache: new Collection([
+        [everyone.id, currentOverwrite(everyone.id)],
+        [administrator.id, currentOverwrite(administrator.id, [
+          PermissionFlagsBits.ViewChannel,
+          PermissionFlagsBits.PinMessages,
+        ])],
+      ]),
+      edit: async (id, options) => edits.push({ id, options }),
+      delete: async () => {},
+    },
+  };
+
+  assert.equal(await syncInheritedPermissionOverwrites(channel, category, 'Test héritage'), true);
+  assert.deepEqual(edits.map((entry) => entry.id), [everyone.id]);
+  assert.equal(edits[0].options.SendMessages, false);
+  assert.equal(edits.some((entry) => entry.id === administrator.id), false);
 });
 
 test('adapte automatiquement les permissions à ACCUEIL, aux membres vérifiés et au STAFF', () => {

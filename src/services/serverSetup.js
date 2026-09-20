@@ -314,6 +314,15 @@ function manageablePermissionOverwrites(guild, desired = []) {
     .map((overwrite) => grantablePermissionOverwrite(guild, overwrite));
 }
 
+function inheritedPermissionOverwrites(category) {
+  return [...category.permissionOverwrites.cache.values()].map((overwrite) => ({
+    id: overwrite.id,
+    type: overwrite.type,
+    allow: overwrite.allow.toArray(),
+    deny: overwrite.deny.toArray(),
+  }));
+}
+
 async function syncPermissionOverwrites(channel, desired = [], reason) {
   const { guild } = channel;
   const desiredById = new Map(desired.map((overwrite) => [overwrite.id, overwrite]));
@@ -340,6 +349,15 @@ async function syncPermissionOverwrites(channel, desired = [], reason) {
   }
 
   return updated;
+}
+
+async function syncInheritedPermissionOverwrites(channel, category, reason) {
+  if (channel.permissionsLocked === true) return false;
+  return syncPermissionOverwrites(
+    channel,
+    inheritedPermissionOverwrites(category),
+    reason,
+  );
 }
 
 function findBlueprintItem(collection, name, predicate = () => true) {
@@ -439,10 +457,11 @@ async function findOrCreateChannel(guild, category, definition, profiles, synchr
       updated = true;
     }
     if (definition.profile === 'inherit') {
-      if (existing.permissionsLocked !== true) {
-        await existing.lockPermissions();
-        updated = true;
-      }
+      updated = await syncInheritedPermissionOverwrites(
+        existing,
+        category,
+        'Permissions héritées du salon FyxBot synchronisées',
+      ) || updated;
     } else if (!permissionOverwritesMatch(existing, permissionOverwrites, guild)) {
       updated = await syncPermissionOverwrites(
         existing,
@@ -509,7 +528,11 @@ async function analyzeServerStructure(guild, fetched = {}, blueprint) {
       continue;
     }
     if (definition.profile === 'inherit') {
-      if (existingChannel.permissionsLocked !== true) permissionIssues.push(`Salon ${definition.name}`);
+      const inheritedOverwrites = inheritedPermissionOverwrites(targetCategory);
+      if (existingChannel.permissionsLocked !== true
+        && !permissionOverwritesMatch(existingChannel, inheritedOverwrites, guild)) {
+        permissionIssues.push(`Salon ${definition.name}`);
+      }
     } else if (!permissionOverwritesMatch(existingChannel, profiles[definition.profile] || profiles.memberCommunity, guild)) {
       permissionIssues.push(`Salon ${definition.name}`);
     }
@@ -683,6 +706,7 @@ module.exports = {
   runtimeChannelProfile,
   runtimeBlueprint,
   setupServer,
+  syncInheritedPermissionOverwrites,
   syncPermissionOverwrites,
   synchronizedRolePermissionBits,
 };
