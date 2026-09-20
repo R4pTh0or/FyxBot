@@ -39,6 +39,23 @@ test('attribue une seule période Fondateur par personne et l’étend à plusie
       (error) => error.code === 'FOUNDER_FULL');
     const rows = await database.query('SELECT COUNT(*)::int AS total FROM fyxbot.premium_founder_trials');
     assert.equal(rows.rows[0].total, 2);
+
+    const partnerId = snowflake(4);
+    const ownerId = snowflake(5);
+    const manual = await store.grantManualPremiumAccess({
+      userId: partnerId,
+      displayName: 'Partenaire Test',
+      reason: 'Partenaire FyxBot',
+      durationDays: 0,
+      grantedBy: ownerId,
+    }, { now: '2026-08-26T10:00:00.000Z' });
+    assert.equal(manual.active, true);
+    assert.equal(manual.endsAt, null);
+    await store.linkManualPremiumAccess(partnerId, secondGuild, { now: '2026-08-26T10:00:00.000Z' });
+    assert.equal((await store.getManualPremiumState(partnerId, secondGuild, { now: '2026-08-27T10:00:00.000Z' })).guildActive, true);
+    assert.equal((await store.listManualPremiumGrants()).length, 1);
+    await store.revokeManualPremiumAccess(partnerId, ownerId, { now: '2026-08-28T10:00:00.000Z' });
+    assert.equal((await store.getManualPremiumState(partnerId, secondGuild, { now: '2026-08-28T10:01:00.000Z' })).guildActive, false);
   } finally { await database.close(); }
 });
 

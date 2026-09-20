@@ -6,6 +6,7 @@ const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const test = require('node:test');
 const { inspectEncryptedBackup } = require('../scripts/check-railway-backup-readonly');
+const { POSTGRES_TABLES } = require('../src/database/postgresSchema');
 const {
   backupObjectKey,
   createExternalBackup,
@@ -48,7 +49,7 @@ test('contrôle une restauration chiffrée entièrement en mémoire, sans touche
     const encrypted = encryptBackup(sqlite.serialize(), key);
     const inspected = inspectEncryptedBackup(encrypted, key);
     assert.equal(inspected.expectedTables, 1);
-    assert.equal(inspected.totalExpectedTables, 27);
+    assert.equal(inspected.totalExpectedTables, POSTGRES_TABLES.length);
     assert.ok(inspected.missingTables.includes('warnings'));
     assert.throws(() => inspectEncryptedBackup(encrypted, crypto.randomBytes(32)));
   } finally {

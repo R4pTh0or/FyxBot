@@ -11,7 +11,7 @@ const { getFounderProgramState } = require('../src/services/premiumFounderAccess
 const { getGuildPremiumEntitlementState } = require('../src/services/premiumEntitlements');
 const { recordGuild, getCreatorStats } = require('../src/database/creatorStatsStore');
 const { listGuildGiveaways } = require('../src/services/communityGiveaways');
-const { POSTGRES_SCHEMA_SQL } = require('../src/database/postgresSchema');
+const { POSTGRES_SCHEMA_SQL, POSTGRES_SCHEMA_VERSION } = require('../src/database/postgresSchema');
 const { assertRuntimeBackendReady, initializeRuntimeBackend, verifyPostgresRuntimeSchema } = require('../src/database/runtimeBackend');
 const {
   STORE_NAMES, configureRuntimeStores, createPostgresRuntimeStores, resolveRuntimeStore,
@@ -30,7 +30,7 @@ test('assemble tous les magasins dans un schéma isolé et refuse un raccordemen
     assert.deepEqual(Object.keys(stores), STORE_NAMES);
     assert.throws(() => configureRuntimeStores({ configuration: stores.configuration }), /incomplets/);
     await assert.rejects(() => verifyPostgresRuntimeSchema(pool, 'fyxbot'), /Version du schéma/);
-    await database.query('INSERT INTO fyxbot.fyxbot_schema_migrations (version, applied_at) VALUES (1, $1)', [new Date().toISOString()]);
+    await database.query('INSERT INTO fyxbot.fyxbot_schema_migrations (version, applied_at) VALUES ($1, $2)', [POSTGRES_SCHEMA_VERSION, new Date().toISOString()]);
     const runtime = await initializeRuntimeBackend({
       environment: { FYXBOT_STORAGE_BACKEND: 'postgres', FYXBOT_POSTGRES_URL: 'postgres://local-test', FYXBOT_POSTGRES_SCHEMA: 'fyxbot' },
       poolFactory: () => pool,

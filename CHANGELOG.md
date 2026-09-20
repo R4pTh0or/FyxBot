@@ -8,7 +8,7 @@ Les évolutions importantes de FyxBot sont documentées dans ce fichier et sur l
 
 - Documentation alignée sur la version 1.5.0 et checklist V2 centralisée dans `docs/V2-READINESS.md`.
 - Données de test isolées dans un dossier temporaire afin qu'une validation locale ne lise ou ne modifie jamais la base de développement.
-- Validation locale complète : syntaxe, types, 279 tests bot, lint, build et 5 tests panel.
+- Validation locale complète : syntaxe, types, 284 tests bot, lint, build et 5 tests panel.
 - FyxPilot Studio affiche maintenant les ajouts, corrections, éléments conservés et suppressions exactes avant application, avec une projection adaptée à l'action choisie.
 - Les brouillons, l'historique avec auteur et le retour arrière guidé sont intégrés au parcours FyxPilot.
 - Un aperçu des permissions finales détaille l'accès de chaque rôle aux catégories et signale les exceptions propres à certains salons.
@@ -24,6 +24,14 @@ Les évolutions importantes de FyxBot sont documentées dans ce fichier et sur l
 - Les échecs et expirations OAuth sont expliqués dans FyxStream au retour de Twitch.
 - Les vingt dernières actions de modération Twitch sont visibles dans un journal borné ; les motifs saisis dans le chat ne sont pas conservés dans cet historique.
 - Le test réel sur une chaîne Twitch de développement reste nécessaire avant de déclarer la V2 terminée.
+
+### Premium partenaire
+
+- Le propriétaire peut attribuer depuis l’espace Créateur un accès Premium offert, limité dans le temps ou sans échéance.
+- Le bénéficiaire peut appliquer ce droit à plusieurs serveurs qu’il administre, sans moyen de paiement ni abonnement.
+- La révocation retire immédiatement ce droit lorsque aucun autre accès Premium n’est actif, sans supprimer les réglages existants.
+- L’historique conserve le bénéficiaire, le motif, l’auteur, les dates d’attribution, d’expiration et de révocation.
+- Une migration PostgreSQL V2 idempotente prépare la nouvelle table avant tout futur déploiement.
 
 Cette section décrit des changements locaux non publiés. La version publique reste celle indiquée par le manifeste de publication.
 

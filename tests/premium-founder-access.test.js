@@ -11,6 +11,7 @@ function createDatabase() {
   const targetDatabase = new DatabaseSync(':memory:');
   targetDatabase.exec(`
     CREATE TABLE premium_founder_trials (user_id TEXT PRIMARY KEY, starts_at TEXT NOT NULL, ends_at TEXT NOT NULL, claimed_at TEXT NOT NULL);
+    CREATE TABLE premium_manual_grants (grant_id TEXT PRIMARY KEY, user_id TEXT NOT NULL, display_name TEXT NOT NULL, reason TEXT NOT NULL, starts_at TEXT NOT NULL, ends_at TEXT, granted_by TEXT NOT NULL, revoked_at TEXT, revoked_by TEXT, created_at TEXT NOT NULL);
     CREATE TABLE premium_user_guilds (user_id TEXT NOT NULL, guild_id TEXT NOT NULL, linked_at TEXT NOT NULL, PRIMARY KEY (user_id, guild_id));
     CREATE TABLE premium_entitlements (entitlement_id TEXT PRIMARY KEY, sku_id TEXT NOT NULL, user_id TEXT, guild_id TEXT, starts_at TEXT, ends_at TEXT, deleted INTEGER NOT NULL DEFAULT 0, test INTEGER NOT NULL DEFAULT 0, observed_at TEXT NOT NULL);
   `);
@@ -108,6 +109,7 @@ test('calcule le forfait depuis les deux magasins PostgreSQL injectés', async (
     getFounderProgramState: async () => ({
       available: false, userActive: false, guildActive: false,
     }),
+    getManualPremiumState: async () => ({ userActive: false, guildActive: false, linkedToGuild: false, grant: null }),
   };
   const state = await getGuildPremiumState(snowflake(1), {
     userId: snowflake(2), entitlementStorage, founderStorage,

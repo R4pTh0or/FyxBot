@@ -181,6 +181,20 @@ type CreatorStats = {
             guilds: number;
         }[];
     };
+    manualPremiumGrants: ManualPremiumGrant[];
+};
+type ManualPremiumGrant = {
+    grantId: string;
+    userId: string;
+    displayName: string;
+    reason: string;
+    startsAt: string;
+    endsAt: string | null;
+    grantedBy: string;
+    revokedAt: string | null;
+    revokedBy: string | null;
+    createdAt: string;
+    active: boolean;
 };
 type BasicConfig = Record<string, string | null>;
 type SetupAnalysis = {
@@ -290,7 +304,7 @@ type PremiumState = {
     entitlementDetected: number;
     entitlementActive: boolean;
     entitlementTest: boolean;
-    sourceOfTruth: "founder-access" | "discord-entitlements" | "free";
+    sourceOfTruth: "manual-access" | "founder-access" | "discord-entitlements" | "free";
     founder: {
         limit: number;
         claimed: number;
@@ -303,6 +317,12 @@ type PremiumState = {
         guildActive: boolean;
         startsAt: string | null;
         endsAt: string | null;
+    };
+    manual: {
+        userActive: boolean;
+        guildActive: boolean;
+        linkedToGuild: boolean;
+        grant: ManualPremiumGrant | null;
     };
     limits: {
         ticketPanels: number;
@@ -558,13 +578,15 @@ function Select({ label, value, options, onChange }: {
             }}><div className="selector-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="selector-head"><div><p className="eyebrow">SÉLECTION</p><h2 id={titleId}>{label}</h2></div><button type="button" onClick={close} aria-label="Fermer la fenêtre">×</button></div><input autoFocus aria-label={`Rechercher dans ${label}`} value={query} onChange={event => setQuery(event.target.value)} placeholder="Rechercher…"/><div className="selector-list" role="listbox" aria-label={label}>{visible.map(option => <button type="button" role="option" aria-selected={option.id === value} className={option.id === value ? "selected" : ""} key={option.id} onClick={() => { onChange(option.id); close(); setQuery(""); }}><span aria-hidden="true">#</span><strong>{option.name}</strong>{option.id === value && <b aria-hidden="true">✓</b>}</button>)}{visible.length === 0 && <p>Aucun résultat.</p>}</div></div></div>}</label>;
 }
 /* eslint-enable jsx-a11y/no-static-element-interactions, jsx-a11y/no-autofocus */
-function CreatorDashboard({ stats, supportStaff, form, update, grantSupportRole, removeSupportRole }: {
+function CreatorDashboard({ stats, supportStaff, form, update, grantSupportRole, removeSupportRole, grantPremiumAccess, revokePremiumAccess }: {
     stats: CreatorStats & UsageStats;
     supportStaff: SupportStaffMember[];
     form: Record<string, string>;
     update: (key: string) => (value: string) => void;
     grantSupportRole: () => void;
     removeSupportRole: (userId: string) => void;
+    grantPremiumAccess: () => void;
+    revokePremiumAccess: (userId: string) => void;
 }) {
     const maxUses = Math.max(...stats.topCommands.map(item => item.uses), 1);
     const activation24h = stats.activation.activation24hRate === null ? "—" : `${stats.activation.activation24hRate}%`;
@@ -593,6 +615,11 @@ function CreatorDashboard({ stats, supportStaff, form, update, grantSupportRole,
             <div className="premium-plan"><p className="eyebrow">OFFRE FONDATEUR</p><h2>Free + FyxBot Premium</h2><div><strong>Free</strong><p>Outils essentiels avec un panneau de tickets, un panneau de rôles et une source sociale.</p></div><div className="premium"><strong>Premium utilisateur</strong><p>Capacités renforcées sur tous les serveurs administrés par le bénéficiaire pendant son accès.</p></div><small>30 jours offerts aux 100 premiers utilisateurs · sans carte ni renouvellement automatique.</small></div>
         </div>
         <div className="command-analytics"><div><p className="eyebrow">USAGE SUR 30 JOURS</p><h2>Commandes les plus utilisées</h2><p>Compteurs anonymes, sans arguments ni identité utilisateur.</p></div>{stats.topCommands.length === 0 ? <p className="analytics-empty">Les prochaines commandes utilisées apparaîtront ici.</p> : <div className="command-ranking">{stats.topCommands.map(item => <article key={item.commandName}><div><strong>/{item.commandName}</strong><small>{item.uses} utilisation(s){item.failures > 0 ? ` · ${item.failures} erreur(s)` : ""}</small></div><span><i style={{ width: `${Math.max((item.uses / maxUses) * 100, 4)}%` }}/></span></article>)}</div>}</div>
+        <div className="premium-grant-panel">
+            <div className="premium-grant-intro"><div><p className="eyebrow">ACCÈS PREMIUM OFFERTS</p><h2>Partenaires et accès administratifs</h2><p>Seul le propriétaire de FyxBot peut attribuer ou retirer ces accès. Chaque décision reste datée et attribuée dans l’historique.</p></div><strong>{stats.manualPremiumGrants.filter(grant => grant.active).length}<small>accès actifs</small></strong></div>
+            <div className="premium-grant-form"><label>Identifiant Discord<input inputMode="numeric" maxLength={20} value={form.premiumGrantUserId || ""} onChange={event => update("premiumGrantUserId")(event.target.value.replace(/\D/g, ""))} placeholder="Ex. 123456789012345678"/></label><label>Motif<input maxLength={120} value={form.premiumGrantReason || "Partenaire FyxBot"} onChange={event => update("premiumGrantReason")(event.target.value)} placeholder="Partenaire, équipe, geste commercial…"/></label><label>Durée<select value={form.premiumGrantDuration || "0"} onChange={event => update("premiumGrantDuration")(event.target.value)}><option value="0">Sans échéance</option><option value="30">30 jours</option><option value="90">90 jours</option><option value="365">1 an</option></select></label><label>Confirmation<input value={form.premiumGrantConfirmation || ""} onChange={event => update("premiumGrantConfirmation")(event.target.value)} placeholder="ACCORDER"/></label><button type="button" disabled={!/^\d{17,20}$/.test(form.premiumGrantUserId || "") || (form.premiumGrantReason || "").trim().length < 2 || form.premiumGrantConfirmation !== "ACCORDER"} onClick={grantPremiumAccess}>Accorder Premium</button></div>
+            <div className="premium-grant-list">{stats.manualPremiumGrants.length === 0 ? <p>Aucun accès Premium offert. Les droits payants et Fondateur restent inchangés.</p> : stats.manualPremiumGrants.map(grant => <article key={grant.grantId} className={grant.active ? "active" : "inactive"}><span aria-hidden="true">{grant.active ? "💎" : "○"}</span><div><strong>{grant.displayName}</strong><small>{grant.userId} · {grant.reason}</small><small>Attribué le {new Date(grant.createdAt).toLocaleDateString("fr-FR")} · {grant.endsAt ? `expire le ${new Date(grant.endsAt).toLocaleDateString("fr-FR")}` : "sans échéance"}{grant.revokedAt ? ` · retiré le ${new Date(grant.revokedAt).toLocaleDateString("fr-FR")}` : ""}</small></div><b>{grant.active ? "Actif" : grant.revokedAt ? "Retiré" : "Expiré"}</b>{grant.active && <button type="button" onClick={() => revokePremiumAccess(grant.userId)}>Retirer</button>}</article>)}</div>
+        </div>
         <div className="support-team-panel"><div className="support-team-intro"><div><p className="eyebrow">ÉQUIPE SUPPORT</p><h2>Déléguer les demandes FyxBot</h2><p>Ajoutez un compte Discord avec le niveau strictement nécessaire. Le propriétaire conserve seul la gestion de cette équipe.</p></div><div className="support-role-summary"><article><strong>Modérateur</strong><p>Consulte toutes les demandes, répond et change leur statut.</p></article><article><strong>Administrateur</strong><p>Possède aussi le droit de modifier les priorités.</p></article></div></div><div className="support-team-form"><label>Identifiant Discord<input inputMode="numeric" maxLength={20} value={form.supportStaffUserId || ""} onChange={event => update("supportStaffUserId")(event.target.value.replace(/\D/g, ""))} placeholder="Ex. 123456789012345678"/></label><label>Niveau<select value={form.supportStaffRole || "moderator"} onChange={event => update("supportStaffRole")(event.target.value)}><option value="moderator">Modérateur</option><option value="administrator">Administrateur</option></select></label><label>Confirmation<input value={form.supportStaffConfirmation || ""} onChange={event => update("supportStaffConfirmation")(event.target.value)} placeholder="ACCORDER"/></label><button type="button" disabled={!/^\d{17,20}$/.test(form.supportStaffUserId || "") || form.supportStaffConfirmation !== "ACCORDER"} onClick={grantSupportRole}>Accorder les droits</button></div><div className="support-team-list">{supportStaff.length === 0 ? <p>Aucun compte délégué. Vous restez la seule personne ayant accès à toutes les demandes.</p> : supportStaff.map(member => <article key={member.userId}><span>{member.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{member.displayName}</strong><small>{member.userId} · mis à jour le {new Date(member.updatedAt).toLocaleDateString("fr-FR")}</small></div><b className={member.role}>{member.role === "administrator" ? "Administrateur" : "Modérateur"}</b><button type="button" onClick={() => removeSupportRole(member.userId)}>Retirer</button></article>)}</div></div>
     </section>;
 }
@@ -919,12 +946,15 @@ function PremiumDashboard({ premium, guildName, activate, busy }: {
     busy: boolean;
 }) {
     const founder = premium.founder;
-    const expiration = founder.endsAt ? new Date(founder.endsAt).toLocaleString("fr-FR") : null;
+    const manual = premium.manual;
+    const rawExpiration = manual.userActive ? manual.grant?.endsAt : founder.endsAt;
+    const expiration = rawExpiration ? new Date(rawExpiration).toLocaleString("fr-FR") : null;
     const activeHere = premium.plan === "premium";
-    const disabled = busy || activeHere || founder.userExpired || (!founder.userClaimed && !founder.available);
-    const buttonLabel = activeHere ? `Actif jusqu’au ${expiration}` : founder.userActive ? `Appliquer à ${guildName}` : founder.userExpired ? "Accès Fondateur terminé" : founder.available ? "Activer 30 jours gratuitement" : "100 accès déjà attribués";
+    const partnerReady = manual.userActive && !manual.linkedToGuild;
+    const disabled = busy || activeHere || (!partnerReady && (founder.userExpired || (!founder.userClaimed && !founder.available)));
+    const buttonLabel = activeHere ? expiration ? `Actif jusqu’au ${expiration}` : "Actif sans échéance" : partnerReady ? `Appliquer l’accès partenaire à ${guildName}` : founder.userActive ? `Appliquer à ${guildName}` : founder.userExpired ? "Accès Fondateur terminé" : founder.available ? "Activer 30 jours gratuitement" : "100 accès déjà attribués";
     const bridgeStatus = premium.entitlementConfigured ? premium.entitlementActive ? `Droit Discord${premium.entitlementTest ? " de test" : ""} détecté` : "Passerelle Discord prête, aucun droit payant actif" : "La facturation Discord reste désactivée";
-    return <section className="premium-workspace"><div className="premium-intro"><div><p className="eyebrow">ACCÈS FONDATEUR FYXBOT</p><h2>30 jours Premium offerts aux 100 premiers utilisateurs</h2><p>Aucune carte bancaire n’est demandée et aucun abonnement ne démarre automatiquement. À l’échéance, le serveur revient simplement à Free.</p></div><span>💎 {founder.remaining}/{founder.limit} places</span></div><div className="founder-offer"><div><strong>{activeHere ? "Premium actif" : founder.userActive ? "Votre accès est prêt" : "Offre de lancement"}</strong><p>{activeHere && expiration ? `Ce serveur bénéficie de Premium jusqu’au ${expiration}.` : founder.userActive && expiration ? `Votre compte est Premium jusqu’au ${expiration}. Vous pouvez appliquer cet accès aux serveurs que vous administrez.` : `Activez l’offre sur ${guildName}. Les réglages Premium resteront conservés après l’échéance, sans nouvelle création au-delà des limites Free.`}</p><small>Aucun moyen de paiement requis · Aucun renouvellement automatique · Aucun prélèvement</small></div><button type="button" disabled={disabled} onClick={() => void activate()}>{busy ? "Activation…" : buttonLabel}</button></div><div className="premium-plans">{premium.plans.map(plan => <article className={plan.id === "premium" ? "featured" : ""} key={plan.id}><small>{plan.id === premium.plan ? "FORFAIT ACTUEL" : "COMPARAISON"}</small><h3>{plan.name}</h3><p>{plan.description}</p><ul>{plan.features.map(feature => <li key={feature}>✓ {feature}</li>)}</ul><button disabled>{plan.id === premium.plan ? "Actif" : plan.id === "premium" ? "Via l’accès Fondateur" : "Inclus"}</button></article>)}</div><p className="premium-note"><strong>État technique :</strong> {bridgeStatus}. L’accès Fondateur est indépendant du futur abonnement Discord et ne peut pas être converti automatiquement en offre payante.</p></section>;
+    return <section className="premium-workspace"><div className="premium-intro"><div><p className="eyebrow">ACCÈS PREMIUM FYXBOT</p><h2>{manual.userActive ? "Votre accès partenaire est prêt" : "30 jours offerts aux 100 premiers utilisateurs"}</h2><p>{manual.userActive ? "Cet accès offert peut être appliqué aux serveurs que vous administrez, sans paiement." : "Aucune carte bancaire n’est demandée et aucun abonnement ne démarre automatiquement. À l’échéance, le serveur revient simplement à Free."}</p></div><span>💎 {manual.userActive ? "PARTENAIRE" : `${founder.remaining}/${founder.limit} places`}</span></div><div className="founder-offer"><div><strong>{activeHere ? "Premium actif" : manual.userActive ? "Accès partenaire disponible" : founder.userActive ? "Votre accès est prêt" : "Offre de lancement"}</strong><p>{activeHere ? expiration ? `Ce serveur bénéficie de Premium jusqu’au ${expiration}.` : "Ce serveur bénéficie de Premium sans échéance." : manual.userActive ? `Appliquez votre accès partenaire à ${guildName}.` : founder.userActive && expiration ? `Votre compte est Premium jusqu’au ${expiration}. Vous pouvez appliquer cet accès aux serveurs que vous administrez.` : `Activez l’offre sur ${guildName}. Les réglages Premium resteront conservés après l’échéance, sans nouvelle création au-delà des limites Free.`}</p><small>Aucun moyen de paiement requis · Aucun renouvellement automatique · Aucun prélèvement</small></div><button type="button" disabled={disabled} onClick={() => void activate()}>{busy ? "Activation…" : buttonLabel}</button></div><div className="premium-plans">{premium.plans.map(plan => <article className={plan.id === "premium" ? "featured" : ""} key={plan.id}><small>{plan.id === premium.plan ? "FORFAIT ACTUEL" : "COMPARAISON"}</small><h3>{plan.name}</h3><p>{plan.description}</p><ul>{plan.features.map(feature => <li key={feature}>✓ {feature}</li>)}</ul><button disabled>{plan.id === premium.plan ? "Actif" : plan.id === "premium" ? "Via un accès éligible" : "Inclus"}</button></article>)}</div><p className="premium-note"><strong>État technique :</strong> {bridgeStatus}. Les accès offerts restent séparés du futur abonnement Discord et sont révocables uniquement par le propriétaire.</p></section>;
 }
 function CommunityDashboard({ data, form, update, createEvent, createGiveaway, navigate }: {
     data: State;
@@ -1387,10 +1417,16 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
     async function activateFounderAccess() {
         if (!data)
             return;
-        const expectedExpiration = data.premium.founder.endsAt
+        const partnerAccess = data.premium.manual.userActive;
+        const expectedExpiration = data.premium.manual.grant?.endsAt
+            ? new Date(data.premium.manual.grant.endsAt)
+            : data.premium.founder.endsAt
             ? new Date(data.premium.founder.endsAt)
             : new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-        const confirmed = window.confirm(`Activer FyxBot Premium sur ${data.guild.name} jusqu’au ${expectedExpiration.toLocaleString("fr-FR")} ?\n\nAucune carte bancaire ne sera demandée. Aucun abonnement ni renouvellement automatique ne sera créé. Après l’échéance, les réglages resteront conservés mais le serveur reviendra aux limites Free.`);
+        const accessPeriod = partnerAccess && !data.premium.manual.grant?.endsAt
+            ? "sans échéance"
+            : `jusqu’au ${expectedExpiration.toLocaleString("fr-FR")}`;
+        const confirmed = window.confirm(`Activer FyxBot Premium sur ${data.guild.name} ${accessPeriod} ?\n\nAucune carte bancaire ne sera demandée. Aucun abonnement ni renouvellement automatique ne sera créé. Après une éventuelle échéance, les réglages resteront conservés mais le serveur reviendra aux limites Free.`);
         if (!confirmed)
             return;
         setNotice("Activation de Premium…");
@@ -1856,6 +1892,53 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
             setNotice(error instanceof Error ? error.message : "Attribution des droits impossible.");
         }
     }
+    async function grantPremiumAccess() {
+        setNotice("Attribution de l’accès Premium…");
+        try {
+            const response = await fetch(`${API}/premium/grants/create`, {
+                method: "POST",
+                credentials: "include",
+                headers: mutationHeaders(csrfToken),
+                body: JSON.stringify({
+                    userId: form.premiumGrantUserId,
+                    reason: form.premiumGrantReason,
+                    durationDays: Number(form.premiumGrantDuration || 0),
+                    confirmation: form.premiumGrantConfirmation,
+                }),
+            });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            setCreatorStats(current => current ? { ...current, manualPremiumGrants: payload.grants || [] } : current);
+            setForm(current => ({ ...current, premiumGrantUserId: "", premiumGrantReason: "Partenaire FyxBot", premiumGrantConfirmation: "" }));
+            setNotice(`✓ Accès Premium accordé à ${payload.grant.displayName}`);
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Attribution Premium impossible.");
+        }
+    }
+    async function revokePremiumAccess(userId: string) {
+        const grant = creatorStats?.manualPremiumGrants.find(item => item.userId === userId && item.active);
+        if (!window.confirm(`Retirer l’accès Premium offert de ${grant?.displayName || userId} ? Les serveurs liés reviendront aux limites Free si aucun autre droit n’est actif.`))
+            return;
+        setNotice("Retrait de l’accès Premium…");
+        try {
+            const response = await fetch(`${API}/premium/grants/revoke`, {
+                method: "POST",
+                credentials: "include",
+                headers: mutationHeaders(csrfToken),
+                body: JSON.stringify({ userId, confirmation: "RETIRER" }),
+            });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            setCreatorStats(current => current ? { ...current, manualPremiumGrants: payload.grants || [] } : current);
+            setNotice("✓ Accès Premium offert retiré");
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Révocation Premium impossible.");
+        }
+    }
     async function removeSupportRole(userId: string) {
         const member = supportStaff.find(item => item.userId === userId);
         if (!window.confirm(`Retirer les droits Support de ${member?.displayName || userId} ?`))
@@ -1992,7 +2075,7 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
         if (active === "Créateur" && !data.creatorAccess)
             return <section className="creator-workspace"><div className="creator-empty"><p className="eyebrow">ACCÈS RESTREINT</p><h2>Espace privé FyxBot</h2><p>Cette section est réservée au propriétaire de l’application.</p></div></section>;
         if (active === "Créateur" && creatorStats)
-            return <CreatorDashboard stats={creatorStats as CreatorStats & UsageStats} supportStaff={supportStaff} form={form} update={update} grantSupportRole={() => void grantSupportRole()} removeSupportRole={userId => void removeSupportRole(userId)}/>;
+            return <CreatorDashboard stats={creatorStats as CreatorStats & UsageStats} supportStaff={supportStaff} form={form} update={update} grantSupportRole={() => void grantSupportRole()} removeSupportRole={userId => void removeSupportRole(userId)} grantPremiumAccess={() => void grantPremiumAccess()} revokePremiumAccess={userId => void revokePremiumAccess(userId)}/>;
         if (active === "Créateur")
             return <section className="creator-workspace">{!creatorStats ? <div className="creator-empty"><p className="eyebrow">ESPACE PRIVÉ</p><h2>Observatoire FyxBot</h2><p>Consulte les installations et l’adoption de l’offre Fondateur Premium.</p><button onClick={loadCreatorStats}>Charger les statistiques</button></div> : <><div className="creator-metrics"><article><span>SERVEURS ACTIFS</span><strong>{creatorStats.guildCount}</strong><small>FyxBot installé actuellement</small></article><article><span>MEMBRES COUVERTS</span><strong>{creatorStats.memberCount.toLocaleString("fr-FR")}</strong><small>Total des communautés</small></article><article><span>INSTALLATIONS</span><strong>{creatorStats.allTime}</strong><small>Depuis le début du suivi</small></article><article><span>DÉSINSTALLATIONS</span><strong>{creatorStats.removed}</strong><small>Depuis le début du suivi</small></article></div><div className="creator-grid"><div className="creator-servers"><p className="eyebrow">SERVEURS ACTIFS</p><h2>Utilisation de FyxBot</h2>{creatorStats.installations.map(guild => <article key={guild.guildId}><div><strong>{guild.guildName}</strong><small>Suivi depuis le {new Date(guild.firstSeenAt).toLocaleDateString("fr-FR")}</small></div><b>{guild.memberCount.toLocaleString("fr-FR")} membres</b></article>)}</div><div className="premium-plan"><p className="eyebrow">OFFRE FONDATEUR</p><h2>Free + FyxBot Premium</h2><div><strong>Free</strong><p>Outils essentiels avec un panneau de tickets, un panneau de rôles et une source sociale.</p></div><div className="premium"><strong>Premium utilisateur</strong><p>Capacités renforcées sur tous les serveurs administrés par le bénéficiaire pendant son accès.</p></div><small>30 jours offerts aux 100 premiers utilisateurs · sans carte ni renouvellement automatique.</small></div></div></>}</section>;
         if (isV2 && active === "Vue d’ensemble")

@@ -77,12 +77,14 @@ test("publie les informations légales et la procédure de signalement à jour",
   assert.match(termsHtml, /FyxBot est disponible en ligne/);
   assert.match(termsHtml, /cent premiers comptes Discord/);
   assert.match(termsHtml, /aucun renouvellement automatique/);
+  assert.match(termsHtml, /partenaire, un membre de l’équipe ou un bénéficiaire identifié/);
   assert.equal(privacy.status, 200);
   const privacyHtml = await privacy.text();
   assert.match(privacyHtml, /Railway héberge le bot/);
   assert.match(privacyHtml, /Participants à un concours/);
   assert.match(privacyHtml, /modérateurs et administrateurs Support/);
   assert.match(privacyHtml, /Accès Fondateur Premium/);
+  assert.match(privacyHtml, /Accès Premium offerts/);
   assert.match(privacyHtml, /aucune donnée bancaire/);
   assert.equal(support.status, 200);
   const supportHtml = await support.text();
@@ -103,8 +105,9 @@ test("publie les informations légales et la procédure de signalement à jour",
 });
 
 test("conserve les protections essentielles du panel", async () => {
-  const [dashboard, css, robots, sitemap, nextConfig, viteConfig, prerenderManifest, releaseSource, releasePublic] = await Promise.all([
+  const [dashboard, server, css, robots, sitemap, nextConfig, viteConfig, prerenderManifest, releaseSource, releasePublic] = await Promise.all([
     readFile(new URL("../app/Dashboard.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../src/services/dashboardServer.js", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../public/robots.txt", import.meta.url), "utf8"),
     readFile(new URL("../public/sitemap.txt", import.meta.url), "utf8"),
@@ -164,10 +167,18 @@ test("conserve les protections essentielles du panel", async () => {
   assert.match(dashboard, /APERÇU DISCORD/);
   assert.match(dashboard, /PARCOURS GUIDÉ/);
   assert.match(dashboard, /SURVEILLANCE AUTOMATIQUE/);
-  assert.match(dashboard, /ACCÈS FONDATEUR FYXBOT/);
+  assert.match(dashboard, /ACCÈS PREMIUM FYXBOT/);
   assert.match(dashboard, /100 premiers utilisateurs/);
   assert.match(dashboard, /Aucun moyen de paiement requis/);
   assert.match(dashboard, /premium\/founder/);
+  assert.match(dashboard, /ACCÈS PREMIUM OFFERTS/);
+  assert.match(dashboard, /premium\/grants\/create/);
+  assert.match(dashboard, /premium\/grants\/revoke/);
+  assert.match(dashboard, /confirmation: "RETIRER"/);
+  assert.match(css, /\.premium-grant-panel/);
+  assert.match(server, /Gestion Premium réservée au propriétaire de FyxBot/);
+  assert.match(server, /body\.confirmation !== 'ACCORDER'/);
+  assert.match(server, /body\.confirmation !== 'RETIRER'/);
   assert.match(dashboard, /ÉQUIPE SUPPORT/);
   assert.match(dashboard, /support\/staff\/upsert/);
   assert.match(dashboard, /support\/staff\/remove/);

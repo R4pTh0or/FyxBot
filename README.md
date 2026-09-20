@@ -161,6 +161,18 @@ opérationnelle les jetons chiffrés et l’identité de la chaîne reliée. Les
 du chat Twitch sont analysés en mémoire et ne sont pas enregistrés ; seuls des
 identifiants techniques anti-doublon à courte durée sont conservés.
 
+## Accès Premium offerts
+
+Le propriétaire de FyxBot peut accorder depuis son espace Créateur un accès
+Premium gratuit, temporaire ou sans échéance, à un compte Discord partenaire.
+Le bénéficiaire peut ensuite appliquer cet accès aux serveurs qu'il administre.
+L'attribution et la révocation sont datées et conservées dans un historique ;
+aucun moyen de paiement et aucun abonnement ne sont créés.
+
+Avant de démarrer cette version sur une base PostgreSQL V1 existante, exécuter
+une seule fois `pnpm run database:postgres:migrate-v2`. La migration est
+idempotente et ne touche pas aux droits Fondateur ni aux droits Discord payants.
+
 ## Arborescence
 
 ```text
@@ -204,10 +216,9 @@ Avec `GUILD_ID`, les commandes sont publiées sur le serveur de développement e
 
 ## Prochaines étapes prévues
 
-- Terminer FyxPilot Studio : comparatif avant application, brouillons, historique et retour arrière guidé depuis le panel.
-- Finaliser l'expérience FyxStream : reconnexion guidée, journal de modération et test de bout en bout sur une chaîne de développement.
+- Valider FyxStream de bout en bout sur une chaîne Twitch de développement.
 - Créer une préproduction Railway avant la publication 2.0.0.
 - Effectuer un exercice réel de restauration R2 et une période de stabilité de sept jours.
-- Finaliser la tarification et le parcours d’achat Discord. L’accès Fondateur actuel offre déjà 30 jours de Premium, sans carte ni renouvellement, aux 100 premiers utilisateurs Discord.
+- Finaliser la tarification et le parcours d’achat Discord. Les accès Fondateur et partenaire restent gratuits, séparés et sans renouvellement automatique.
 
 La liste de validation complète se trouve dans [docs/V2-READINESS.md](docs/V2-READINESS.md).

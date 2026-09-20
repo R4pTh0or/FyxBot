@@ -17,7 +17,7 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [x] Stockage PostgreSQL disponible avec repli SQLite contrôlé.
 - [x] Sauvegardes chiffrées et tests automatisés de restauration.
 - [x] Journalisation structurée et contrôles d'accès du panel.
-- [x] Suite locale validée : 279 tests bot et 5 tests panel, lint, types et build.
+- [x] Suite locale validée : 284 tests bot et 5 tests panel, lint, types et build.
 - [ ] Mettre à jour automatiquement l'état du projet et la liste des commandes.
 - [x] Relier le dossier source `C:\Fyxbot` au dépôt GitHub FyxBot ; le dépôt Git vide imbriqué dans `dashboard` a été sauvegardé localement avant son retrait.
 - [ ] Effectuer un exercice réel de restauration R2 sans modifier la production.
@@ -51,7 +51,7 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [x] Application de Premium à plusieurs serveurs administrés par le bénéficiaire.
 - [ ] Valider la grille définitive des fonctions et les tarifs.
 - [ ] Tester les SKU Discord, l'activation, l'expiration, l'annulation et le remboursement.
-- [ ] Ajouter l'attribution gratuite propriétaire/partenaire avec journal d'audit.
+- [x] Ajouter l'attribution gratuite propriétaire/partenaire avec historique d'attribution et de révocation.
 - [ ] Publier une présentation claire des limites avant tout achat.
 
 ## 5. Préproduction et qualité

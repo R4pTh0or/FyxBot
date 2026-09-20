@@ -183,6 +183,20 @@ database.exec(`
     claimed_at TEXT NOT NULL
   );
   CREATE INDEX IF NOT EXISTS premium_founder_trials_ends ON premium_founder_trials(ends_at);
+  CREATE TABLE IF NOT EXISTS premium_manual_grants (
+    grant_id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    display_name TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    starts_at TEXT NOT NULL,
+    ends_at TEXT,
+    granted_by TEXT NOT NULL,
+    revoked_at TEXT,
+    revoked_by TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS premium_manual_grants_user ON premium_manual_grants(user_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS premium_manual_grants_active ON premium_manual_grants(user_id, revoked_at, ends_at);
   CREATE TABLE IF NOT EXISTS premium_user_guilds (
     user_id TEXT NOT NULL,
     guild_id TEXT NOT NULL,

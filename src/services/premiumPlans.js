@@ -3,6 +3,7 @@ const {
   getUserPremiumEntitlementState,
 } = require('./premiumEntitlements');
 const { getFounderProgramState } = require('./premiumFounderAccess');
+const { getManualPremiumState } = require('./premiumManualAccess');
 
 const PREMIUM_ENFORCEMENT_ENABLED = true;
 const PLAN_LIMITS = Object.freeze({
@@ -33,29 +34,34 @@ async function getGuildPremiumState(guildId, {
   skuIds,
 } = {}) {
   const entitlementOptions = { targetDatabase, storage: entitlementStorage, now, ...(skuIds ? { skuIds } : {}) };
-  const [guildEntitlement, userEntitlement, founder] = await Promise.all([
+  const [guildEntitlement, userEntitlement, founder, manual] = await Promise.all([
     getGuildPremiumEntitlementState(guildId, entitlementOptions),
     getUserPremiumEntitlementState(userId, entitlementOptions),
     getFounderProgramState(userId, guildId, { targetDatabase, storage: founderStorage, now }),
+    getManualPremiumState(userId, guildId, { targetDatabase, storage: founderStorage, now }),
   ]);
-  const premiumActive = PREMIUM_ENFORCEMENT_ENABLED && (founder.guildActive || guildEntitlement.active || userEntitlement.active);
+  const premiumActive = PREMIUM_ENFORCEMENT_ENABLED
+    && (manual.guildActive || founder.guildActive || guildEntitlement.active || userEntitlement.active);
   const activePlan = premiumActive ? 'premium' : 'free';
   const entitlementConfigured = guildEntitlement.configured || userEntitlement.configured;
   return {
     plan: activePlan,
     name: PLANS[activePlan].name,
     billingEnabled: entitlementConfigured,
-    premiumAvailable: founder.available || founder.userActive || entitlementConfigured,
+    premiumAvailable: manual.userActive || founder.available || founder.userActive || entitlementConfigured,
     entitlementConfigured,
     entitlementDetected: guildEntitlement.detected + userEntitlement.detected,
     entitlementActive: guildEntitlement.active || userEntitlement.active,
     entitlementTest: guildEntitlement.test || userEntitlement.test,
-    sourceOfTruth: founder.guildActive
-      ? 'founder-access'
-      : guildEntitlement.active || userEntitlement.active
-        ? 'discord-entitlements'
-        : 'free',
+    sourceOfTruth: manual.guildActive
+      ? 'manual-access'
+      : founder.guildActive
+        ? 'founder-access'
+        : guildEntitlement.active || userEntitlement.active
+          ? 'discord-entitlements'
+          : 'free',
     founder,
+    manual,
     limits: PLAN_LIMITS[activePlan],
     plans: Object.values(PLANS),
   };

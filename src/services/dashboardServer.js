@@ -70,6 +70,13 @@ const {
 const { buildOnboardingProgress } = require('./onboardingProgress');
 const { assertPremiumLimit, getGuildPremiumState } = require('./premiumPlans');
 const { claimFounderAccess } = require('./premiumFounderAccess');
+const {
+  getManualPremiumState,
+  grantManualPremiumAccess,
+  linkManualPremiumAccess,
+  listManualPremiumGrants,
+  revokeManualPremiumAccess,
+} = require('./premiumManualAccess');
 const { setupTemporaryVoice } = require('./temporaryVoice');
 const { publicMessagePayload } = require('./customMessages');
 const {
@@ -910,12 +917,20 @@ function startDashboardServer(client, options = {}) {
         if (!manageableGuildIds.includes(guildId)) throw new HttpError(403, 'Vous n’êtes pas autorisé à administrer ce serveur.');
         const access = await requireGuildCapability(client, guildId, session, [PermissionFlagsBits.ManageGuild]);
         try {
-          const founder = await claimFounderAccess(session.user.id, access.guild.id);
+          const manualState = await getManualPremiumState(session.user.id, access.guild.id);
+          const activation = manualState.userActive
+            ? await linkManualPremiumAccess(session.user.id, access.guild.id)
+            : await claimFounderAccess(session.user.id, access.guild.id);
           const premium = await getGuildPremiumState(access.guild.id, { userId: session.user.id });
+          const expiration = premium.sourceOfTruth === 'manual-access'
+            ? premium.manual.grant?.endsAt
+            : activation.endsAt;
           return send(response, 200, {
             ok: true,
             premium,
-            message: `FyxBot Premium est actif sur ${access.guild.name} jusqu’au ${new Date(founder.endsAt).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' })}. Aucun paiement ni renouvellement automatique.`,
+            message: expiration
+              ? `FyxBot Premium est actif sur ${access.guild.name} jusqu’au ${new Date(expiration).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' })}. Aucun paiement ni renouvellement automatique.`
+              : `FyxBot Premium partenaire est actif sans échéance sur ${access.guild.name}. Aucun paiement ni renouvellement automatique.`,
           }, origin);
         } catch (error) {
           if (error?.code === 'FOUNDER_FULL' || error?.code === 'FOUNDER_EXPIRED') throw new HttpError(409, error.message);
@@ -924,7 +939,48 @@ function startDashboardServer(client, options = {}) {
       }
       if (request.method === 'GET' && url.pathname === '/api/creator/stats') {
         if (!await isApplicationOwner(client, session?.user.id)) return send(response, 403, { error: 'Espace réservé au créateur de FyxBot.' }, origin);
-        return send(response, 200, await getCreatorStats(client.guilds.cache.values()), origin);
+        return send(response, 200, {
+          ...await getCreatorStats(client.guilds.cache.values()),
+          manualPremiumGrants: await listManualPremiumGrants(),
+        }, origin);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/premium/grants/create') {
+        if (!await isApplicationOwner(client, session?.user.id)) throw new HttpError(403, 'Gestion Premium réservée au propriétaire de FyxBot.');
+        const body = await readBody(request);
+        if (body.confirmation !== 'ACCORDER') throw new HttpError(400, 'Écrivez ACCORDER pour confirmer cet accès Premium.');
+        const userId = String(body.userId || '').trim();
+        if (!/^\d{17,20}$/.test(userId)) throw new HttpError(400, 'Identifiant Discord invalide.');
+        const durationDays = Number(body.durationDays ?? 0);
+        if (!Number.isInteger(durationDays) || durationDays < 0 || durationDays > 3650) {
+          throw new HttpError(400, 'Durée Premium invalide.');
+        }
+        const discordUser = await client.users.fetch(userId).catch(() => null);
+        if (!discordUser || discordUser.bot) throw new HttpError(404, 'Utilisateur Discord introuvable ou non autorisé.');
+        try {
+          const grant = await grantManualPremiumAccess({
+            userId,
+            displayName: discordUser.globalName || discordUser.username,
+            reason: body.reason,
+            durationDays,
+            grantedBy: session.user.id,
+          });
+          return send(response, 200, { ok: true, grant, grants: await listManualPremiumGrants() }, origin);
+        } catch (error) {
+          if (error?.userMessage) throw new HttpError(error.code === 'MANUAL_GRANT_ACTIVE' ? 409 : 400, error.userMessage);
+          throw error;
+        }
+      }
+      if (request.method === 'POST' && url.pathname === '/api/premium/grants/revoke') {
+        if (!await isApplicationOwner(client, session?.user.id)) throw new HttpError(403, 'Gestion Premium réservée au propriétaire de FyxBot.');
+        const body = await readBody(request);
+        if (body.confirmation !== 'RETIRER') throw new HttpError(400, 'Écrivez RETIRER pour confirmer la révocation Premium.');
+        try {
+          await revokeManualPremiumAccess(body.userId, session.user.id);
+          return send(response, 200, { ok: true, grants: await listManualPremiumGrants() }, origin);
+        } catch (error) {
+          if (error?.userMessage) throw new HttpError(error.code === 'MANUAL_GRANT_NOT_FOUND' ? 404 : 400, error.userMessage);
+          throw error;
+        }
       }
       if (request.method === 'GET' && url.pathname === '/api/support/staff') {
         if (!await isApplicationOwner(client, session?.user.id)) throw new HttpError(403, 'Gestion de l’équipe réservée au propriétaire de FyxBot.');

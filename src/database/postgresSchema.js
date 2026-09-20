@@ -1,4 +1,4 @@
-const POSTGRES_SCHEMA_VERSION = 1;
+const POSTGRES_SCHEMA_VERSION = 2;
 
 const POSTGRES_TABLES = [
   'configurations',
@@ -14,6 +14,7 @@ const POSTGRES_TABLES = [
   'guild_activation_progress',
   'premium_entitlements',
   'premium_founder_trials',
+  'premium_manual_grants',
   'premium_user_guilds',
   'community_giveaways',
   'community_giveaway_entries',
@@ -167,6 +168,21 @@ CREATE TABLE IF NOT EXISTS premium_founder_trials (
   claimed_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS premium_founder_trials_ends ON premium_founder_trials(ends_at);
+
+CREATE TABLE IF NOT EXISTS premium_manual_grants (
+  grant_id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  display_name TEXT NOT NULL,
+  reason TEXT NOT NULL,
+  starts_at TEXT NOT NULL,
+  ends_at TEXT,
+  granted_by TEXT NOT NULL,
+  revoked_at TEXT,
+  revoked_by TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS premium_manual_grants_user ON premium_manual_grants(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS premium_manual_grants_active ON premium_manual_grants(user_id, revoked_at, ends_at);
 
 CREATE TABLE IF NOT EXISTS premium_user_guilds (
   user_id TEXT NOT NULL,

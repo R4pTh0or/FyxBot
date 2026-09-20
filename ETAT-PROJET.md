@@ -66,6 +66,8 @@ annonce publique.
   sans carte ni renouvellement automatique.
 - Un accès actif peut être appliqué à plusieurs serveurs administrés par son
   bénéficiaire.
+- Le propriétaire peut accorder un accès Premium partenaire temporaire ou sans
+  échéance, le révoquer et consulter l'historique daté depuis l'espace Créateur.
 - Limites Free et Premium actives sans suppression des réglages existants à
   l'expiration.
 - Le parcours payant définitif, les tarifs et le cycle complet des SKU Discord
@@ -89,7 +91,7 @@ annonce publique.
 
 - [x] Aligner le README avec FyxStream et l'état actuel du stockage.
 - [x] Créer une définition vérifiable de la V2.
-- [x] Validation locale complète : syntaxe et types valides, **279 tests bot**,
+- [x] Validation locale complète : syntaxe et types valides, **284 tests bot**,
   **5 tests panel**, lint et build réussis.
 - [x] `C:\Fyxbot` est relié à l'historique GitHub sur la branche locale
   `v2-development-2026-09-19`. Le dépôt vide imbriqué dans `dashboard` a été
@@ -118,7 +120,7 @@ annonce publique.
 
 - Valider la matrice Free/Premium, les tarifs et le nombre de serveurs inclus.
 - Tester les SKU Discord de bout en bout.
-- Ajouter les accès gratuits propriétaire/partenaire avec journal d'audit.
+- [x] Ajouter les accès gratuits propriétaire/partenaire avec historique d'audit.
 - Créer une préproduction Railway distincte après accord sur son coût.
 - Passer une période de stabilité de sept jours avant l'annonce 2.0.0.
 - Préparer le changelog, le tutoriel et la campagne Pulse.
