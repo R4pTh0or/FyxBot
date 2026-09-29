@@ -40,13 +40,13 @@ test('chiffre et restaure une sauvegarde sans perte', () => {
   assert.equal(restored.header.algorithm, 'aes-256-gcm');
 });
 
-test('contrôle une restauration chiffrée entièrement en mémoire, sans toucher à Railway', () => {
+test('contrôle une restauration chiffrée entièrement en mémoire, sans toucher à Railway', async () => {
   const sqlite = new DatabaseSync(':memory:');
   try {
     sqlite.exec('CREATE TABLE configurations (guild_id TEXT PRIMARY KEY)');
     sqlite.prepare('INSERT INTO configurations VALUES (?)').run('test');
     const key = crypto.randomBytes(32);
-    const encrypted = encryptBackup(sqlite.serialize(), key);
+    const encrypted = encryptBackup(await snapshotDatabase(sqlite, os.tmpdir()), key);
     const inspected = inspectEncryptedBackup(encrypted, key);
     assert.equal(inspected.expectedTables, 1);
     assert.equal(inspected.totalExpectedTables, POSTGRES_TABLES.length);

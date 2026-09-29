@@ -5,6 +5,14 @@ const logger = require('./services/logger').logger.child({ component: 'bootstrap
 let bootRuntime;
 let bootClient;
 
+process.on('unhandledRejection', (reason) => {
+  logger.error({ err: reason }, '[FyxBot] Promesse rejetée non gérée.');
+});
+process.on('uncaughtException', (error) => {
+  logger.fatal({ err: error }, '[FyxBot] Exception non interceptée, arrêt pour redémarrage propre.');
+  process.exit(1);
+});
+
 async function start() {
   const config = getConfig();
   const runtime = await initializeRuntimeBackend();
