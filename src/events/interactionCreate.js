@@ -145,6 +145,8 @@ module.exports = {
     const command = interaction.client.commands.get(interaction.commandName);
     if (!command) {
       logger.warn({ commandName: interaction.commandName, guildId: interaction.guildId }, '[FyxBot] Commande inconnue.');
+      await interaction.reply({ content: 'Cette commande n’est plus disponible.', flags: MessageFlags.Ephemeral })
+        .catch((responseError) => logInteractionError(responseError, '[FyxBot] Réponse commande inconnue impossible.', interaction));
       return;
     }
     const subcommand = interaction.options.getSubcommand?.(false) || null;

@@ -353,6 +353,7 @@ function sessionRateLimit(session, method, pathname) {
 }
 
 async function readBody(request) {
+  request.setEncoding('utf8');
   let body = '';
   for await (const chunk of request) {
     body += chunk;
@@ -770,7 +771,12 @@ function startDashboardServer(client, options = {}) {
   }
   const authCleanup = startDashboardAuthCleanup({ store: authStore });
   const server = http.createServer(async (request, response) => {
-    const url = new URL(request.url, `http://127.0.0.1:${serverPort}`);
+    let url;
+    try {
+      url = new URL(request.url, `http://127.0.0.1:${serverPort}`);
+    } catch {
+      return send(response, 400, { error: 'Requête invalide.' }, 'null');
+    }
     const requestOrigin = request.headers.origin || '';
     if (!['GET', 'POST', 'OPTIONS'].includes(request.method || '')) {
       return send(response, 405, { error: 'Méthode HTTP refusée.' }, 'null', { Allow: 'GET, POST, OPTIONS' });
@@ -2242,4 +2248,4 @@ function startDashboardServer(client, options = {}) {
   return server;
 }
 
-module.exports = { HttpError, asTwitchHttpError, buildAllowedOrigins, contentDeleteError, deleteTrackedDiscordMessage, getDashboardState, isLoopbackHost, isRequestOriginAllowed, leaveGuildInstallation, messagePublishError, normalizeBotNickname, panelErrorResponse, rateLimit, requireGuildCapability, requireRecentAuthentication, requireTwitchGuildAccess, revalidateManageableGuildIds, sessionRateLimit, startDashboardServer, updateGuildBotNickname };
+module.exports = { HttpError, asTwitchHttpError, buildAllowedOrigins, readBody, contentDeleteError, deleteTrackedDiscordMessage, getDashboardState, isLoopbackHost, isRequestOriginAllowed, leaveGuildInstallation, messagePublishError, normalizeBotNickname, panelErrorResponse, rateLimit, requireGuildCapability, requireRecentAuthentication, requireTwitchGuildAccess, revalidateManageableGuildIds, sessionRateLimit, startDashboardServer, updateGuildBotNickname };

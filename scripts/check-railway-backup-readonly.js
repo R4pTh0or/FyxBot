@@ -1,3 +1,6 @@
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { DatabaseSync } = require('node:sqlite');
 const { GetObjectCommand, ListObjectsV2Command, S3Client } = require('@aws-sdk/client-s3');
 const { decryptBackup, getExternalBackupConfig } = require('../src/services/externalBackup');
@@ -7,9 +10,14 @@ const MAX_ENCRYPTED_BYTES = 256 * 1024 * 1024;
 
 function inspectEncryptedBackup(encrypted, encryptionKey) {
   const { database: bytes } = decryptBackup(encrypted, encryptionKey);
-  const sqlite = new DatabaseSync(':memory:');
+  // DatabaseSync.deserialize() n'existe pas sur Node 22 : on ouvre la copie
+  // déchiffrée en lecture seule depuis un dossier temporaire privé.
+  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'fyxbot-backup-check-'));
+  const temporaryFile = path.join(temporaryDirectory, 'backup.sqlite');
+  fs.writeFileSync(temporaryFile, bytes, { mode: 0o600 });
+  let sqlite;
   try {
-    sqlite.deserialize(bytes);
+    sqlite = new DatabaseSync(temporaryFile, { readOnly: true });
     const integrity = sqlite.prepare('PRAGMA integrity_check').get()?.integrity_check;
     if (integrity !== 'ok') throw new Error('Intégrité SQLite invalide.');
     const tables = new Set(sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all().map((row) => row.name));
@@ -17,7 +25,8 @@ function inspectEncryptedBackup(encrypted, encryptionKey) {
     return { expectedTables: POSTGRES_TABLES.length - missingTables.length,
       totalExpectedTables: POSTGRES_TABLES.length, missingTables };
   } finally {
-    sqlite.close();
+    sqlite?.close();
+    fs.rmSync(temporaryDirectory, { recursive: true, force: true });
   }
 }
 
