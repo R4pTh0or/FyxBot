@@ -2,7 +2,7 @@
 
 ## Statut
 
-La V2 est un aperçu local isolé à l’adresse `/v2`. La V1 reste disponible à la racine `/` et aucun déploiement Railway n’est autorisé pendant cette phase de préparation.
+La V2 est l’interface principale du Control Center public. Les routes `/` et `/v2` utilisent toutes les deux cette interface afin de conserver les anciens liens. Toute nouvelle modification continue d’être préparée et testée dans `C:\Fyxbot` avant une publication Railway explicitement autorisée.
 
 ## Lancement local complet
 
@@ -22,22 +22,26 @@ Le mode `dashboard:local` se connecte à Discord uniquement pour alimenter le pa
 - Rendre l’état du serveur compréhensible par une personne peu habituée à Discord.
 - Garantir un usage confortable sur ordinateur, tablette et téléphone.
 
-## Première fondation intégrée
+## Fondations intégrées
 
 - Nouvelle identité visuelle `Control Center V2`, toujours rouge et orange.
-- Route locale indépendante `/v2` avec interdiction d’indexation.
+- Routes `/` et `/v2` conservées, avec indexation limitée à la page publique principale.
 - Centre de pilotage enrichi avec progression réelle de la configuration.
 - Accès direct au démarrage, à la sécurité, aux tickets et au support.
 - Activité récente issue des journaux réels du serveur.
 - Bibliothèque de modules plus compacte et plus lisible.
-- V1 inchangée et toujours accessible sur `/`.
+- FyxPilot Studio avec aperçu, historique et retour arrière contrôlé.
+- FyxJourney avec score pondéré, diagnostic explicable et plan d’actions priorisé.
+- FyxVision avec simulation en lecture seule des permissions réelles d'un rôle Discord.
+- Assistance : compteur et filtre des demandes à traiter, alerte visible hors de l’onglet et lien direct vers une conversation (accès toujours contrôlé).
+- En production, les nouvelles demandes et réponses déclenchent des messages privés Discord discrets. En local, aucun message privé n’est envoyé ; un refus de MP n’empêche pas l’enregistrement de la demande.
 
 ## Étapes suivantes proposées
 
-1. Tester l’aperçu avec plusieurs tailles d’écran et corriger les détails visuels.
-2. Recueillir les choix définitifs sur la navigation et la densité des pages.
-3. Étendre progressivement la nouvelle présentation aux écrans de configuration.
-4. Effectuer un audit complet d’accessibilité et de performance.
-5. Préparer une migration contrôlée, avec retour possible vers la V1.
+1. Finaliser la consolidation 2.0.1 et vérifier FyxJourney sur plusieurs serveurs.
+2. Tester les parcours mobile, clavier, chargement, vide, succès et erreur.
+3. Étendre FyxVision à un membre cumulant plusieurs rôles Discord.
+4. Étendre FyxTwin à plusieurs brouillons comparables sans mutation du serveur.
+5. Préparer FyxFlow et ses automatisations avec simulation avant activation.
 
-Les concepts produits gardés pour plus tard ne sont pas inclus dans cette V2 tant qu’ils n’ont pas été validés séparément.
+Ces étapes restent locales tant que leur déploiement n’a pas été confirmé séparément.

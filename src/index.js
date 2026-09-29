@@ -17,6 +17,8 @@ async function start() {
   const { startExternalBackupScheduler } = require('./services/externalBackup');
   const { startBirthdayScheduler } = require('./services/birthdays');
   const { startSocialNotificationScheduler } = require('./services/socialAutomation');
+  const { startOfficialStatusScheduler } = require('./services/officialServerStatus');
+  const { startSupportRetentionScheduler } = require('./services/supportRetention');
   const { startTwitchConnectionManager } = require('./services/twitchConnectionManager');
   const twitchStore = runtime.stores
     ? { ...require('./database/twitchStore'), ...runtime.stores.twitch }
@@ -50,6 +52,8 @@ async function start() {
   });
   const birthdayScheduler = startBirthdayScheduler(client);
   const socialScheduler = startSocialNotificationScheduler(client);
+  const officialStatusScheduler = startOfficialStatusScheduler(client);
+  const supportRetentionScheduler = startSupportRetentionScheduler();
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
@@ -58,6 +62,8 @@ async function start() {
     backupScheduler.stop();
     birthdayScheduler.stop();
     socialScheduler.stop();
+    officialStatusScheduler.stop();
+    supportRetentionScheduler.stop();
     twitchManager.stop();
     dashboardServer.close(async () => {
       client.destroy();

@@ -1,6 +1,8 @@
 # État du projet FyxBot
 
-Dernière consolidation et publication : **20 septembre 2026**.
+Dernière consolidation locale : **21 septembre 2026**. Dernière publication :
+**20 septembre 2026**, complétée par le déploiement des rôles Premium le
+21 septembre.
 
 Ce document décrit l'état fonctionnel du code présent dans `C:\Fyxbot`. Les
 identifiants de déploiement Railway ne sont plus figés ici : ils changent à
@@ -9,7 +11,9 @@ annonce publique.
 
 ## Version actuelle
 
-- Version applicative : **2.0.0**.
+- Version locale préparée : **2.0.1**.
+- Version publique annoncée : **2.0.0** jusqu’à confirmation du prochain
+  déploiement.
 - Site public : <https://fyxbot-panel-production.up.railway.app/>.
 - Services Railway : `fyxbot-bot` et `fyxbot-panel`.
 - Commandes Discord présentes dans le code : **34**.
@@ -40,7 +44,10 @@ annonce publique.
 - Connexion Discord OAuth et sélection des serveurs administrables.
 - Configuration isolée pour chaque serveur.
 - Navigation V2, recherche de modules et affichage adapté au mobile.
-- Parcours de démarrage et espace FyxPilot.
+- FyxJourney avec score de préparation pondéré, diagnostic explicable et trois
+  prochaines actions prioritaires.
+- FyxPilot Studio avec aperçu, historique et retour arrière contrôlé.
+- FyxVision avec perspective réelle du compte connecté ou d'un rôle isolé sur les salons existants et alertes de permissions sensibles.
 - Bibliothèque des messages publiés avec modification et corbeille.
 - Support privé avec rôles Modérateur et Administrateur.
 - Espace Créateur masqué aux utilisateurs non autorisés.
@@ -68,6 +75,8 @@ annonce publique.
   bénéficiaire.
 - Le propriétaire peut accorder un accès Premium partenaire temporaire ou sans
   échéance, le révoquer et consulter l'historique daté depuis l'espace Créateur.
+- Attribution configurable de rôles Discord distincts pour les abonnements
+  payants et les accès Premium offerts, avec resynchronisation automatique.
 - Limites Free et Premium actives sans suppression des réglages existants à
   l'expiration.
 - Le parcours payant définitif, les tarifs et le cycle complet des SKU Discord
@@ -91,7 +100,7 @@ annonce publique.
 
 - [x] Aligner le README avec FyxStream et l'état actuel du stockage.
 - [x] Créer une définition vérifiable de la V2.
-- [x] Validation locale complète : syntaxe et types valides, **284 tests bot**,
+- [x] Validation locale complète : syntaxe et types valides, **304 tests bot**,
   **5 tests panel**, lint et build réussis.
 - [x] `C:\Fyxbot` est relié à l'historique GitHub sur la branche locale
   `v2-development-2026-09-19`. Le dépôt vide imbriqué dans `dashboard` a été
@@ -101,8 +110,17 @@ annonce publique.
   bot et panel sains lors de la publication.
 - [ ] Effectuer un exercice réel de restauration R2 vers une destination
   isolée, sans écraser la production.
+- [x] Préparer la consolidation 2.0.1 avec une version commune pour le bot, le
+  panel, le manifeste et le changelog.
 
-### Priorité 2 — FyxPilot Studio
+### Priorité 2 — FyxJourney
+
+- [x] Remplacer la simple checklist par un score pondéré sur 100.
+- [x] Expliquer chaque écart et son impact sans mutation automatique.
+- [x] Prioriser jusqu’à trois prochaines actions avec accès direct au module.
+- [ ] Vérifier le diagnostic sur plusieurs serveurs et niveaux de permissions.
+
+### Priorité 3 — FyxPilot Studio
 
 - [x] Comparatif visuel des ajouts, modifications, suppressions exactes et résultat projeté selon l'action choisie.
 - [x] Brouillons de configuration enregistrables et récupérables.
@@ -110,7 +128,7 @@ annonce publique.
 - [x] Retour arrière guidé depuis le panel avec confirmation renforcée.
 - [x] Aperçu complet des permissions finales par rôle et catégorie, avec les exceptions de salon.
 
-### Priorité 3 — FyxStream
+### Priorité 4 — FyxStream
 
 - [x] Reconnexion guidée lorsque des autorisations Twitch manquent.
 - [x] Historique borné des actions de modération.
@@ -119,14 +137,23 @@ annonce publique.
   `fyxstream` ; les actions de modération destructrices ne sont pas exécutées
   sans cible de test dédiée.
 
-### Priorité 4 — Premium et publication
+### Priorité 5 — Premium et publication
 
 - Valider la matrice Free/Premium, les tarifs et le nombre de serveurs inclus.
 - Tester les SKU Discord de bout en bout.
 - [x] Ajouter les accès gratuits propriétaire/partenaire avec historique d'audit.
 - Créer une préproduction Railway distincte après accord sur son coût.
-- Surveiller la stabilité de la version 2.0.0 après publication.
+- Publier la consolidation 2.0.1 uniquement après validation locale complète et
+  confirmation explicite.
 - Préparer le tutoriel et la campagne Pulse.
+
+### Après la consolidation
+
+- [x] Étendre FyxVision à la perspective réelle d’un rôle Discord.
+- Comparer ensuite côte à côte le compte connecté et un rôle isolé.
+- Étendre FyxTwin à plusieurs versions virtuelles comparables.
+- Préparer FyxFlow, avec déclencheurs, actions, simulation et journal
+  d’exécution avant toute activation.
 
 ## Conservé volontairement
 

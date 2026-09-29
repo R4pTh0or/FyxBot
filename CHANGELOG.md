@@ -2,6 +2,37 @@
 
 Les évolutions importantes de FyxBot sont documentées dans ce fichier et sur la page publique `/changelog`.
 
+## [2.0.1] — 21 septembre 2026
+
+### Rôles Premium automatiques
+
+- Attribution de `💎 Client Premium` lors d’un abonnement Discord actif.
+- Attribution distincte de `🎁 Premium offert` pour les accès Fondateur, partenaires et invitations accordées par le propriétaire.
+- Passage automatique entre les deux rôles, puis retrait à l’expiration, au remboursement ou à la révocation.
+- Configuration par serveur depuis la page Premium du panel ou avec `/premium roles-configurer`, avec contrôles de sécurité sur les permissions et la hiérarchie Discord.
+- Resynchronisation à l’arrivée d’un membre, au démarrage du bot et toutes les heures.
+
+### FyxJourney
+
+- Nouveau score de préparation pondéré sur 100 couvrant la structure, la sécurité, le règlement, les journaux, l’accueil, les tickets et l’animation.
+- Diagnostic explicable avec écarts détectés, impact attendu et état `Prêt`, `À corriger` ou `À configurer`.
+- Plan limité aux trois prochaines actions prioritaires, avec accès direct au bon module du Control Center.
+- Une structure n’est plus considérée comme prête après la simple création d’un aperçu : les éléments et permissions doivent réellement correspondre à la proposition.
+- Aucune correction n’est exécutée depuis le diagnostic sans ouverture du module et confirmation de l’administrateur.
+
+### FyxVision
+
+- Nouvelle perspective réelle permettant de sélectionner un rôle Discord et de voir les salons visibles, masqués, accessibles en écriture ou gérables.
+- Mode « Mon compte » réservé à l’utilisateur Discord connecté : droits effectifs de tous ses rôles combinés, avec les exceptions propres à chaque salon, sans modification du serveur.
+- Calcul fondé sur les permissions effectives de chaque salon, sans modification du serveur.
+- Alertes explicables pour les rôles Administrateur, les droits de gestion étendus et les espaces sensibles visibles par un rôle non privilégié.
+- Filtres par salons visibles ou masqués et affichage regroupé par catégorie dans le Control Center.
+
+### Consolidation V2
+
+- Version commune `2.0.1` pour le bot, le panel, le manifeste de publication et le changelog.
+- Documentation actualisée après la mise en ligne de la V2 et le déploiement des rôles Premium.
+
 ## [2.0.0] — 20 septembre 2026
 
 ### Control Center V2 et FyxPilot Studio

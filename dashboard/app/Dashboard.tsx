@@ -274,25 +274,80 @@ type SetupSimulation = {
         projected: { roles: number; categories: number; channels: number };
     }>;
 };
+type PermissionRoleOption = Option & {
+    color?: string;
+    everyone?: boolean;
+};
+type RolePerspective = {
+    previewOnly: true;
+    guild: { id: string; name: string };
+    subject: {
+        type: "role" | "member";
+        id: string;
+        name: string;
+        color: string;
+        everyone: boolean;
+        elevated: boolean;
+        roleNames: string[];
+        roleCount: number;
+    };
+    summary: {
+        total: number;
+        visible: number;
+        hidden: number;
+        read: number;
+        write: number;
+        control: number;
+    };
+    warnings: {
+        code: string;
+        severity: "critical" | "warning";
+        title: string;
+        detail: string;
+    }[];
+    categories: {
+        id: string;
+        name: string;
+        channels: {
+            id: string;
+            name: string;
+            kind: "text" | "voice" | "other";
+            visible: boolean;
+            canReadHistory: boolean;
+            canWrite: boolean;
+            canManage: boolean;
+            tone: "hidden" | "read" | "write" | "control";
+            label: string;
+        }[];
+    }[];
+};
+type OnboardingStep = {
+    key: string;
+    title: string;
+    description: string;
+    target: string;
+    status: "complete" | "attention" | "missing";
+    score: number;
+    maxScore: number;
+    issues: string[];
+    impact: string;
+    complete: boolean;
+};
 type OnboardingProgress = {
     completedCount: number;
     totalCount: number;
     percent: number;
+    healthScore: number;
     complete: boolean;
-    steps: {
-        key: string;
-        title: string;
-        description: string;
-        target: string;
-        complete: boolean;
-    }[];
-    recommendedStep: {
-        key: string;
-        title: string;
-        description: string;
-        target: string;
-        complete: boolean;
-    } | null;
+    steps: OnboardingStep[];
+    diagnostics: OnboardingStep[];
+    recommendations: OnboardingStep[];
+    recommendedStep: OnboardingStep | null;
+    summary: {
+        ready: number;
+        attention: number;
+        missing: number;
+    };
     healthLevel: "new" | "starting" | "progressing" | "ready";
 };
 type PremiumState = {
@@ -323,6 +378,10 @@ type PremiumState = {
         guildActive: boolean;
         linkedToGuild: boolean;
         grant: ManualPremiumGrant | null;
+    };
+    roleConfig: {
+        paidRoleId: string | null;
+        complimentaryRoleId: string | null;
     };
     limits: {
         ticketPanels: number;
@@ -394,6 +453,7 @@ type State = {
         voiceChannels: Option[];
         categories: Option[];
         roles: Option[];
+        permissionRoles: PermissionRoleOption[];
         assignableRoles: Option[];
         members: Option[];
     };
@@ -502,7 +562,11 @@ type SupportRequest = {
     updatedAt: string;
     lastMessageAt: string;
     closedAt: string | null;
+    canReopen?: boolean;
+    reopenUntil?: string | null;
+    expiresAt?: string | null;
     messageCount?: number;
+    lastAuthorRole?: "user" | "staff";
 };
 type SupportConversation = {
     request: SupportRequest;
@@ -528,6 +592,7 @@ type SupportAccess = {
     canReplyAsStaff: boolean;
     canManageStatus: boolean;
     canManagePriority: boolean;
+    canDeleteRequests: boolean;
     canManageTeam: boolean;
 };
 type SupportWorkspace = {
@@ -539,6 +604,7 @@ type SupportWorkspace = {
         total: number;
         open: number;
         urgent: number;
+        actionRequired: number;
     };
 };
 type SupportStaffMember = {
@@ -578,7 +644,7 @@ function Select({ label, value, options, onChange }: {
             }}><div className="selector-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}><div className="selector-head"><div><p className="eyebrow">SÉLECTION</p><h2 id={titleId}>{label}</h2></div><button type="button" onClick={close} aria-label="Fermer la fenêtre">×</button></div><input autoFocus aria-label={`Rechercher dans ${label}`} value={query} onChange={event => setQuery(event.target.value)} placeholder="Rechercher…"/><div className="selector-list" role="listbox" aria-label={label}>{visible.map(option => <button type="button" role="option" aria-selected={option.id === value} className={option.id === value ? "selected" : ""} key={option.id} onClick={() => { onChange(option.id); close(); setQuery(""); }}><span aria-hidden="true">#</span><strong>{option.name}</strong>{option.id === value && <b aria-hidden="true">✓</b>}</button>)}{visible.length === 0 && <p>Aucun résultat.</p>}</div></div></div>}</label>;
 }
 /* eslint-enable jsx-a11y/no-static-element-interactions, jsx-a11y/no-autofocus */
-function CreatorDashboard({ stats, supportStaff, form, update, grantSupportRole, removeSupportRole, grantPremiumAccess, revokePremiumAccess }: {
+function CreatorDashboard({ stats, supportStaff, form, update, grantSupportRole, removeSupportRole, grantPremiumAccess, revokePremiumAccess, leaveGuild }: {
     stats: CreatorStats & UsageStats;
     supportStaff: SupportStaffMember[];
     form: Record<string, string>;
@@ -587,17 +653,41 @@ function CreatorDashboard({ stats, supportStaff, form, update, grantSupportRole,
     removeSupportRole: (userId: string) => void;
     grantPremiumAccess: () => void;
     revokePremiumAccess: (userId: string) => void;
+    leaveGuild: (guildId: string, guildName: string) => void;
 }) {
     const maxUses = Math.max(...stats.topCommands.map(item => item.uses), 1);
     const activation24h = stats.activation.activation24hRate === null ? "—" : `${stats.activation.activation24hRate}%`;
+    const removalGuild = stats.installations.find(guild => guild.guildId === form.creatorRemovalGuildId) || null;
+    const activePremiumGrants = stats.manualPremiumGrants.filter(grant => grant.active).length;
+    const commandSuccessRate = stats.totalCommands30d === 0
+        ? "—"
+        : `${Math.max(0, Math.round((1 - (stats.failedCommands30d / stats.totalCommands30d)) * 1000) / 10)}%`;
+    const creatorStatus = stats.activation.stalledGuilds7d > 0 || stats.failedCommands30d > 0 ? "À surveiller" : "Sous contrôle";
     return <section className="creator-workspace">
-        <div className="creator-metrics">
-            <article><span>SERVEURS ACTIFS</span><strong>{stats.guildCount}</strong><small>FyxBot installé actuellement</small></article>
-            <article><span>MEMBRES COUVERTS</span><strong>{stats.memberCount.toLocaleString("fr-FR")}</strong><small>Total des communautés</small></article>
-            <article><span>COMMANDES · 30 JOURS</span><strong>{stats.totalCommands30d.toLocaleString("fr-FR")}</strong><small>{stats.commandActiveGuilds30d} serveur(s) avec commandes</small></article>
-            <article><span>ERREURS · 30 JOURS</span><strong>{stats.failedCommands30d.toLocaleString("fr-FR")}</strong><small>Commandes à surveiller</small></article>
+        <div className="creator-command-center">
+            <div className="creator-command-copy">
+                <p className="eyebrow"><span aria-hidden="true"/> CENTRE DE PILOTAGE PRIVÉ</p>
+                <h2>Une vue claire pour décider, agir et faire grandir FyxBot.</h2>
+                <p>Suivez l’adoption, repérez les serveurs à accompagner et gérez les accès sensibles depuis un espace réservé au propriétaire.</p>
+                <div className="creator-command-meta"><span>🔒 Accès propriétaire</span><span>● Données synchronisées</span><span>🧭 {stats.guildCount} serveur(s) suivis</span></div>
+            </div>
+            <aside className={creatorStatus === "Sous contrôle" ? "creator-network-status healthy" : "creator-network-status warning"}>
+                <span>ÉTAT DU RÉSEAU</span>
+                <strong>{creatorStatus}</strong>
+                <p>{stats.activation.stalledGuilds7d > 0 ? `${stats.activation.stalledGuilds7d} serveur(s) n’ont pas progressé depuis 7 jours.` : "Aucun serveur ne nécessite de relance immédiate."}</p>
+                <div><small>Fiabilité des commandes</small><b>{commandSuccessRate}</b></div>
+            </aside>
         </div>
-        <div className="activation-analytics">
+        <div className="creator-section-nav" role="navigation" aria-label="Sections de l’espace Créateur">
+            <a href="#creator-overview">Vue globale</a><a href="#creator-adoption">Adoption</a><a href="#creator-usage">Usage</a><a href="#creator-premium">Premium</a><a href="#creator-team">Équipe</a>
+        </div>
+        <div className="creator-metrics" id="creator-overview">
+            <article><div><i aria-hidden="true">◆</i><span>SERVEURS ACTIFS</span></div><strong>{stats.guildCount}</strong><small>{stats.allTime.toLocaleString("fr-FR")} installation(s) depuis le lancement</small></article>
+            <article><div><i aria-hidden="true">◉</i><span>MEMBRES COUVERTS</span></div><strong>{stats.memberCount.toLocaleString("fr-FR")}</strong><small>Audience cumulée des communautés</small></article>
+            <article><div><i aria-hidden="true">↗</i><span>COMMANDES · 30 JOURS</span></div><strong>{stats.totalCommands30d.toLocaleString("fr-FR")}</strong><small>{stats.commandActiveGuilds30d} serveur(s) ont utilisé une commande</small></article>
+            <article className={stats.failedCommands30d > 0 ? "needs-attention" : "is-healthy"}><div><i aria-hidden="true">{stats.failedCommands30d > 0 ? "!" : "✓"}</i><span>FIABILITÉ</span></div><strong>{commandSuccessRate}</strong><small>{stats.failedCommands30d.toLocaleString("fr-FR")} erreur(s) sur 30 jours</small></article>
+        </div>
+        <div className="activation-analytics" id="creator-adoption">
             <div><p className="eyebrow">ACTIVATION DES SERVEURS</p><h2>Parcours guidé et rétention</h2><p>Un serveur est activé dès qu’il termine {stats.activation.threshold} étapes sur {stats.activation.totalSteps}. Les compteurs ne contiennent ni utilisateur, ni argument de commande.</p></div>
             <div className="activation-summary">
                 <article><strong>{stats.activation.currentActivatedGuilds}/{stats.guildCount}</strong><small>serveurs activés</small></article>
@@ -611,16 +701,24 @@ function CreatorDashboard({ stats, supportStaff, form, update, grantSupportRole,
             <p className="activation-note">{stats.activation.eligibleNewGuilds > 0 ? `${stats.activation.activatedWithin24h}/${stats.activation.eligibleNewGuilds} nouveau(x) serveur(s) activé(s) en moins de 24 heures.` : "La cohorte 24 heures commencera avec les prochaines installations ; les anciens serveurs ne sont pas comptés rétroactivement."}{stats.activation.pendingNewGuilds > 0 ? ` ${stats.activation.pendingNewGuilds} installation(s) récente(s) sont encore dans leur fenêtre de 24 heures.` : ""}</p>
         </div>
         <div className="creator-grid">
-            <div className="creator-servers"><p className="eyebrow">SERVEURS ACTIFS</p><h2>Utilisation de FyxBot</h2>{stats.installations.map(guild => <article key={guild.guildId}><div><strong>{guild.guildName}</strong><small>Suivi depuis le {new Date(guild.firstSeenAt).toLocaleDateString("fr-FR")} · {guild.completedSteps}/{guild.totalSteps} étapes</small></div><b>{guild.activated ? "Activé" : `${guild.memberCount.toLocaleString("fr-FR")} membres`}</b></article>)}</div>
-            <div className="premium-plan"><p className="eyebrow">OFFRE FONDATEUR</p><h2>Free + FyxBot Premium</h2><div><strong>Free</strong><p>Outils essentiels avec un panneau de tickets, un panneau de rôles et une source sociale.</p></div><div className="premium"><strong>Premium utilisateur</strong><p>Capacités renforcées sur tous les serveurs administrés par le bénéficiaire pendant son accès.</p></div><small>30 jours offerts aux 100 premiers utilisateurs · sans carte ni renouvellement automatique.</small></div>
+            <div className="creator-servers"><div className="creator-panel-heading"><div><p className="eyebrow">PARC INSTALLÉ</p><h2>Serveurs et progression</h2></div><span>{stats.installations.length} actif(s)</span></div>{stats.installations.length === 0 ? <p className="creator-list-empty">Aucun serveur actif pour le moment.</p> : stats.installations.map(guild => { const progress = guild.totalSteps > 0 ? Math.min(100, Math.round((guild.completedSteps / guild.totalSteps) * 100)) : 0; return <article key={guild.guildId}><span className="creator-server-avatar" aria-hidden="true">{guild.guildName.slice(0, 1).toUpperCase()}</span><div className="creator-server-copy"><strong>{guild.guildName}</strong><small>{guild.memberCount.toLocaleString("fr-FR")} membres · suivi depuis le {new Date(guild.firstSeenAt).toLocaleDateString("fr-FR")}</small><span className="creator-server-progress" aria-label={`${progress}% du parcours terminé`}><i style={{ width: `${progress}%` }}/></span></div><div className="creator-server-state"><b className={guild.activated ? "activated" : "progress"}>{guild.activated ? "Activé" : "En cours"}</b><small>{guild.completedSteps}/{guild.totalSteps} étapes</small></div></article>; })}</div>
+            <div className="premium-plan"><div className="creator-panel-heading"><div><p className="eyebrow">MODÈLE FYXBOT</p><h2>Free + Premium</h2></div><span>{activePremiumGrants} offert(s)</span></div><div className="creator-plan-card"><span aria-hidden="true">○</span><div><strong>Free</strong><p>Les outils essentiels pour découvrir FyxBot et configurer une première communauté.</p></div></div><div className="creator-plan-card premium"><span aria-hidden="true">◆</span><div><strong>Premium utilisateur</strong><p>Toutes les capacités avancées sur les serveurs administrés pendant la durée de l’accès.</p></div></div><small>Offre de lancement : 30 jours offerts aux 100 premiers utilisateurs, sans carte ni renouvellement automatique.</small></div>
         </div>
-        <div className="command-analytics"><div><p className="eyebrow">USAGE SUR 30 JOURS</p><h2>Commandes les plus utilisées</h2><p>Compteurs anonymes, sans arguments ni identité utilisateur.</p></div>{stats.topCommands.length === 0 ? <p className="analytics-empty">Les prochaines commandes utilisées apparaîtront ici.</p> : <div className="command-ranking">{stats.topCommands.map(item => <article key={item.commandName}><div><strong>/{item.commandName}</strong><small>{item.uses} utilisation(s){item.failures > 0 ? ` · ${item.failures} erreur(s)` : ""}</small></div><span><i style={{ width: `${Math.max((item.uses / maxUses) * 100, 4)}%` }}/></span></article>)}</div>}</div>
-        <div className="premium-grant-panel">
+        <div className="command-analytics" id="creator-usage"><div><p className="eyebrow">USAGE SUR 30 JOURS</p><h2>Commandes les plus utilisées</h2><p>Compteurs anonymes, sans arguments ni identité utilisateur.</p></div>{stats.topCommands.length === 0 ? <p className="analytics-empty">Les prochaines commandes utilisées apparaîtront ici.</p> : <div className="command-ranking">{stats.topCommands.map(item => <article key={item.commandName}><div><strong>/{item.commandName}</strong><small>{item.uses} utilisation(s){item.failures > 0 ? ` · ${item.failures} erreur(s)` : ""}</small></div><span><i style={{ width: `${Math.max((item.uses / maxUses) * 100, 4)}%` }}/></span></article>)}</div>}</div>
+        <div className="premium-grant-panel" id="creator-premium">
             <div className="premium-grant-intro"><div><p className="eyebrow">ACCÈS PREMIUM OFFERTS</p><h2>Partenaires et accès administratifs</h2><p>Seul le propriétaire de FyxBot peut attribuer ou retirer ces accès. Chaque décision reste datée et attribuée dans l’historique.</p></div><strong>{stats.manualPremiumGrants.filter(grant => grant.active).length}<small>accès actifs</small></strong></div>
             <div className="premium-grant-form"><label>Identifiant Discord<input inputMode="numeric" maxLength={20} value={form.premiumGrantUserId || ""} onChange={event => update("premiumGrantUserId")(event.target.value.replace(/\D/g, ""))} placeholder="Ex. 123456789012345678"/></label><label>Motif<input maxLength={120} value={form.premiumGrantReason || "Partenaire FyxBot"} onChange={event => update("premiumGrantReason")(event.target.value)} placeholder="Partenaire, équipe, geste commercial…"/></label><label>Durée<select value={form.premiumGrantDuration || "0"} onChange={event => update("premiumGrantDuration")(event.target.value)}><option value="0">Sans échéance</option><option value="30">30 jours</option><option value="90">90 jours</option><option value="365">1 an</option></select></label><label>Confirmation<input value={form.premiumGrantConfirmation || ""} onChange={event => update("premiumGrantConfirmation")(event.target.value)} placeholder="ACCORDER"/></label><button type="button" disabled={!/^\d{17,20}$/.test(form.premiumGrantUserId || "") || (form.premiumGrantReason || "").trim().length < 2 || form.premiumGrantConfirmation !== "ACCORDER"} onClick={grantPremiumAccess}>Accorder Premium</button></div>
             <div className="premium-grant-list">{stats.manualPremiumGrants.length === 0 ? <p>Aucun accès Premium offert. Les droits payants et Fondateur restent inchangés.</p> : stats.manualPremiumGrants.map(grant => <article key={grant.grantId} className={grant.active ? "active" : "inactive"}><span aria-hidden="true">{grant.active ? "💎" : "○"}</span><div><strong>{grant.displayName}</strong><small>{grant.userId} · {grant.reason}</small><small>Attribué le {new Date(grant.createdAt).toLocaleDateString("fr-FR")} · {grant.endsAt ? `expire le ${new Date(grant.endsAt).toLocaleDateString("fr-FR")}` : "sans échéance"}{grant.revokedAt ? ` · retiré le ${new Date(grant.revokedAt).toLocaleDateString("fr-FR")}` : ""}</small></div><b>{grant.active ? "Actif" : grant.revokedAt ? "Retiré" : "Expiré"}</b>{grant.active && <button type="button" onClick={() => revokePremiumAccess(grant.userId)}>Retirer</button>}</article>)}</div>
         </div>
-        <div className="support-team-panel"><div className="support-team-intro"><div><p className="eyebrow">ÉQUIPE SUPPORT</p><h2>Déléguer les demandes FyxBot</h2><p>Ajoutez un compte Discord avec le niveau strictement nécessaire. Le propriétaire conserve seul la gestion de cette équipe.</p></div><div className="support-role-summary"><article><strong>Modérateur</strong><p>Consulte toutes les demandes, répond et change leur statut.</p></article><article><strong>Administrateur</strong><p>Possède aussi le droit de modifier les priorités.</p></article></div></div><div className="support-team-form"><label>Identifiant Discord<input inputMode="numeric" maxLength={20} value={form.supportStaffUserId || ""} onChange={event => update("supportStaffUserId")(event.target.value.replace(/\D/g, ""))} placeholder="Ex. 123456789012345678"/></label><label>Niveau<select value={form.supportStaffRole || "moderator"} onChange={event => update("supportStaffRole")(event.target.value)}><option value="moderator">Modérateur</option><option value="administrator">Administrateur</option></select></label><label>Confirmation<input value={form.supportStaffConfirmation || ""} onChange={event => update("supportStaffConfirmation")(event.target.value)} placeholder="ACCORDER"/></label><button type="button" disabled={!/^\d{17,20}$/.test(form.supportStaffUserId || "") || form.supportStaffConfirmation !== "ACCORDER"} onClick={grantSupportRole}>Accorder les droits</button></div><div className="support-team-list">{supportStaff.length === 0 ? <p>Aucun compte délégué. Vous restez la seule personne ayant accès à toutes les demandes.</p> : supportStaff.map(member => <article key={member.userId}><span>{member.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{member.displayName}</strong><small>{member.userId} · mis à jour le {new Date(member.updatedAt).toLocaleDateString("fr-FR")}</small></div><b className={member.role}>{member.role === "administrator" ? "Administrateur" : "Modérateur"}</b><button type="button" onClick={() => removeSupportRole(member.userId)}>Retirer</button></article>)}</div></div>
+        <div className="support-team-panel" id="creator-team"><div className="support-team-intro"><div><p className="eyebrow">ÉQUIPE SUPPORT</p><h2>Déléguer les demandes FyxBot</h2><p>Ajoutez un compte Discord avec le niveau strictement nécessaire. Le propriétaire conserve seul la gestion de cette équipe.</p></div><div className="support-role-summary"><article><strong>Modérateur</strong><p>Consulte toutes les demandes, répond et change leur statut.</p></article><article><strong>Administrateur</strong><p>Possède aussi le droit de modifier les priorités.</p></article></div></div><div className="support-team-form"><label>Identifiant Discord<input inputMode="numeric" maxLength={20} value={form.supportStaffUserId || ""} onChange={event => update("supportStaffUserId")(event.target.value.replace(/\D/g, ""))} placeholder="Ex. 123456789012345678"/></label><label>Niveau<select value={form.supportStaffRole || "moderator"} onChange={event => update("supportStaffRole")(event.target.value)}><option value="moderator">Modérateur</option><option value="administrator">Administrateur</option></select></label><label>Confirmation<input value={form.supportStaffConfirmation || ""} onChange={event => update("supportStaffConfirmation")(event.target.value)} placeholder="ACCORDER"/></label><button type="button" disabled={!/^\d{17,20}$/.test(form.supportStaffUserId || "") || form.supportStaffConfirmation !== "ACCORDER"} onClick={grantSupportRole}>Accorder les droits</button></div><div className="support-team-list">{supportStaff.length === 0 ? <p>Aucun compte délégué. Vous restez la seule personne ayant accès à toutes les demandes.</p> : supportStaff.map(member => <article key={member.userId}><span>{member.displayName.slice(0, 1).toUpperCase()}</span><div><strong>{member.displayName}</strong><small>{member.userId} · mis à jour le {new Date(member.updatedAt).toLocaleDateString("fr-FR")}</small></div><b className={member.role}>{member.role === "administrator" ? "Administrateur" : "Modérateur"}</b><button type="button" onClick={() => removeSupportRole(member.userId)}>Retirer</button></article>)}</div></div>
+        <details className="creator-danger-zone">
+            <summary><div><span aria-hidden="true">⚠</span><div><strong>Zone sensible</strong><small>Retirer FyxBot d’un serveur et nettoyer ses données.</small></div></div><b>Afficher</b></summary>
+            <div className="creator-removal-panel">
+                <div><p className="eyebrow">GESTION DES INSTALLATIONS</p><h2>Retirer FyxBot d’un serveur</h2><p>Cette action est réservée au propriétaire de FyxBot et ne demande pas l’accord du propriétaire du serveur. FyxBot quittera immédiatement le serveur et ses données liées seront nettoyées.</p></div>
+                <div className="creator-removal-form"><label>Serveur<select value={form.creatorRemovalGuildId || ""} onChange={event => { update("creatorRemovalGuildId")(event.target.value); update("creatorRemovalConfirmation")(''); }}><option value="">Choisir un serveur…</option>{stats.installations.map(guild => <option key={guild.guildId} value={guild.guildId}>{guild.guildName} · {guild.memberCount.toLocaleString("fr-FR")} membres</option>)}</select></label><label>Recopiez exactement le nom du serveur<input value={form.creatorRemovalConfirmation || ""} onChange={event => update("creatorRemovalConfirmation")(event.target.value)} placeholder={removalGuild?.guildName || "Nom exact du serveur"}/></label><button type="button" disabled={!removalGuild || form.creatorRemovalConfirmation !== removalGuild.guildName} onClick={() => removalGuild && leaveGuild(removalGuild.guildId, removalGuild.guildName)}>Retirer FyxBot</button></div>
+                <small>Votre session Discord active, le nom exact du serveur et la confirmation finale protègent cette action.</small>
+            </div>
+        </details>
     </section>;
 }
 const MODERATION_COMMANDS = [
@@ -753,6 +851,101 @@ function BlueprintPreview({ blueprint }: { blueprint: SetupBlueprint }) {
     const explanationByCategory = new Map((blueprint.explanations || []).map(item => [item.categoryKey, item.reason]));
     return <details className="setup-blueprint-preview" open><summary>Prévisualiser la structure proposée</summary><div className="setup-preview-switch" role="group" aria-label="Mode de prévisualisation"><button type="button" className={previewMode === "discord" ? "active" : ""} onClick={() => setPreviewMode("discord")}>Aperçu Discord</button><button type="button" className={previewMode === "details" ? "active" : ""} onClick={() => setPreviewMode("details")}>Liste détaillée</button></div>{previewMode === "discord" ? <DiscordServerPreview blueprint={blueprint}/> : <div className="setup-blueprint-grid"><section><h3>Rôles · {blueprint.roles.length}</h3><ul>{blueprint.roles.map(role => <li key={role.key}>{role.name}</li>)}</ul></section><section><h3>Catégories et salons · {blueprint.channels.length}</h3><div className="setup-category-preview">{blueprint.categories.map(category => { const categoryChannels = blueprint.channels.filter(channel => channel.category === category.key); return <article key={category.key}><strong>{category.name}</strong>{explanationByCategory.get(category.key) && <small>{explanationByCategory.get(category.key)}</small>}<ul>{categoryChannels.map(channel => <li key={channel.key}><span>{channel.type === "voice" ? "Vocal" : "Texte"}</span>{channel.name}</li>)}</ul></article>; })}</div></section></div>}<p>Aucun rôle, catégorie ou salon n’est créé tant que vous ne confirmez pas l’action située plus bas.</p></details>;
 }
+function RolePerspectiveWorkspace({ guildId, roles }: { guildId: string; roles: PermissionRoleOption[] }) {
+    const [mode, setMode] = useState<"account" | "role">("account");
+    const [roleId, setRoleId] = useState(roles[0]?.id || "");
+    const [perspective, setPerspective] = useState<RolePerspective | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState("");
+    const [filter, setFilter] = useState<"all" | "visible" | "hidden">("all");
+
+    useEffect(() => {
+        if (mode === "role" && !roleId)
+            return;
+        const controller = new AbortController();
+        const query = new URLSearchParams({ guildId });
+        if (mode === "account") query.set("subject", "me");
+        else query.set("roleId", roleId);
+        void fetch(`${API}/permissions/perspective?${query}`, { credentials: "include", signal: controller.signal })
+            .then(async response => {
+                const payload = await response.json();
+                if (!response.ok)
+                    throw Error(payload.error || "La perspective ne peut pas être calculée.");
+                setPerspective(payload.perspective);
+            })
+            .catch(fetchError => {
+                if (fetchError?.name !== "AbortError")
+                    setError(fetchError?.message || "La perspective ne peut pas être calculée.");
+            })
+            .finally(() => {
+                if (!controller.signal.aborted)
+                    setLoading(false);
+            });
+        return () => controller.abort();
+    }, [guildId, mode, roleId]);
+
+    const displayedCategories = perspective?.categories.map(category => ({
+        ...category,
+        channels: category.channels.filter(channel => filter === "all"
+            || (filter === "visible" ? channel.visible : !channel.visible)),
+    })).filter(category => category.channels.length > 0) || [];
+
+    return <section className="role-perspective-workspace">
+        <header>
+            <div>
+                <p className="eyebrow">FYXVISION · PERSPECTIVE RÉELLE</p>
+                <h2>Voir Discord avec vos permissions</h2>
+                <p>Vérifiez votre compte avec tous ses rôles combinés, ou simulez un rôle isolé. Cette lecture ne modifie rien sur Discord.</p>
+            </div>
+            <div className="role-perspective-controls">
+                <div className="role-perspective-mode" role="group" aria-label="Perspective Discord">
+                    {([{"id":"account","label":"Mon compte"},{"id":"role","label":"Un rôle"}] as const).map(item => <button type="button" key={item.id} className={mode === item.id ? "active" : ""} aria-pressed={mode === item.id} onClick={() => {
+                        if (mode === item.id) return;
+                        setMode(item.id);
+                        setPerspective(null);
+                        setError("");
+                        setLoading(true);
+                    }}>{item.label}</button>)}
+                </div>
+                {mode === "role" && <Select label="Rôle à simuler" value={roleId} options={roles} onChange={nextRoleId => {
+                    setRoleId(nextRoleId);
+                    setPerspective(null);
+                    setError("");
+                    setLoading(true);
+                }}/>}
+            </div>
+        </header>
+        {loading && <div className="role-perspective-state" role="status"><span>◌</span><strong>Calcul des permissions Discord…</strong></div>}
+        {error && <div className="role-perspective-state error" role="alert"><span>!</span><div><strong>Perspective indisponible</strong><p>{error}</p></div></div>}
+        {perspective && <>
+            <div className="role-perspective-identity">
+                <i style={{ backgroundColor: perspective.subject.color }}/>
+                <div><strong>{perspective.subject.name}</strong><small>{perspective.subject.type === "member" ? `Votre compte · ${perspective.subject.roleCount} rôle(s) combiné(s)` : perspective.subject.everyone ? "Rôle de base du serveur" : perspective.subject.elevated ? "Rôle avec droits élevés" : "Rôle sans droits d’administration détectés"}</small></div>
+                <span>Lecture seule</span>
+            </div>
+            {perspective.subject.type === "member" && <div className="role-perspective-roles" aria-label="Rôles de votre compte"><strong>Rôles pris en compte</strong><div>{perspective.subject.roleNames.length ? perspective.subject.roleNames.map((name, index) => <span key={`${name}-${index}`}>{name}</span>) : <span>@everyone uniquement</span>}</div><small>Les exceptions de salons propres à votre compte sont aussi incluses.</small></div>}
+            <div className="role-perspective-summary">
+                <article><span>VISIBLES</span><strong>{perspective.summary.visible}</strong><small>sur {perspective.summary.total} salons</small></article>
+                <article><span>MASQUÉS</span><strong>{perspective.summary.hidden}</strong><small>inaccessibles {perspective.subject.type === "member" ? "à votre compte" : "au rôle"}</small></article>
+                <article><span>ÉCRITURE / VOCAL</span><strong>{perspective.summary.write}</strong><small>interaction autorisée</small></article>
+                <article><span>GESTION</span><strong>{perspective.summary.control}</strong><small>droits de modération</small></article>
+            </div>
+            {perspective.warnings.length > 0 && <div className="role-perspective-warnings">{perspective.warnings.map(warning => <article className={warning.severity} key={warning.code}><span>{warning.severity === "critical" ? "⛔" : "⚠️"}</span><div><strong>{warning.title}</strong><p>{warning.detail}</p></div></article>)}</div>}
+            <div className="role-perspective-toolbar" role="group" aria-label="Filtrer les salons simulés">
+                <span>Salons par catégorie</span>
+                {([{"id":"all","label":"Tous"},{"id":"visible","label":"Visibles"},{"id":"hidden","label":"Masqués"}] as const).map(item => <button type="button" className={filter === item.id ? "active" : ""} key={item.id} onClick={() => setFilter(item.id)}>{item.label}</button>)}
+            </div>
+            <div className="role-perspective-categories">
+                {displayedCategories.map(category => <article key={category.id}>
+                    <header><strong>{category.name}</strong><small>{category.channels.length} salon(s)</small></header>
+                    <div>{category.channels.map(channel => <div className={`permission-${channel.tone}`} key={channel.id}><span aria-hidden="true">{channel.kind === "voice" ? "🔊" : "#"}</span><strong>{channel.name.replace(/^[^・]+・/, "")}</strong><small>{channel.label}</small></div>)}</div>
+                </article>)}
+                {displayedCategories.length === 0 && <p className="role-perspective-empty">Aucun salon ne correspond à ce filtre.</p>}
+            </div>
+            <p className="role-perspective-note">{perspective.subject.type === "member" ? "FyxVision affiche les droits effectifs de votre compte connecté, avec tous ses rôles et les exceptions de chaque salon. Aucun changement n’est envoyé à Discord." : "FyxVision simule ici un rôle isolé. Un membre qui cumule plusieurs rôles peut obtenir davantage de droits par l’addition de leurs permissions."}</p>
+        </>}
+    </section>;
+}
 function FyxVisionWorkspace({ simulation, mode }: { simulation: SetupSimulation; mode: SetupMode }) {
     const [twinOpen, setTwinOpen] = useState(true);
     const plan = simulation.plans[mode];
@@ -877,7 +1070,7 @@ function SetupDashboard({ data, form, update, runSetup, deletePreview, saveNickn
             setIsDesigning(false);
         }
     }
-    return <section className="setup-workspace"><div className="bot-identity-settings"><div className="bot-identity-preview"><span>F</span><div><p className="eyebrow">IDENTITÉ SUR CE SERVEUR</p><h2>{desiredNickname || "FyxBot"}</h2><small>Application FyxBot · surnom visible uniquement sur {data.guild.name}</small></div></div><div className="bot-identity-form"><label>Surnom du bot<input value={form.botNickname || ""} maxLength={32} onChange={event => { update("botNickname")(event.target.value); update("botNicknameConfirmation")(''); }} placeholder="Laisser vide pour afficher FyxBot"/></label><label>Confirmation<input value={form.botNicknameConfirmation || ""} onChange={event => update("botNicknameConfirmation")(event.target.value)} placeholder={`Écrivez ${nicknameConfirmation}`}/></label><button type="button" disabled={!nicknameChanged || form.botNicknameConfirmation !== nicknameConfirmation} onClick={() => saveNickname(desiredNickname, form.botNicknameConfirmation || "")}>{desiredNickname ? "Appliquer le surnom" : "Revenir à FyxBot"}</button></div><p>Le nom global, le badge d’application et les liens officiels restent FyxBot afin que les membres puissent toujours identifier le bot.</p></div><div className="setup-designer"><div><p className="eyebrow">SERVEUR SUR MESURE</p><h2>Décrivez ce que vous voulez</h2><p>Aucun profil n’est imposé. Expliquez l’objectif du serveur, son public, ses activités et les fonctions nécessaires. FyxBot proposera les rôles, catégories et salons adaptés.</p></div><label>Description libre<textarea rows={5} maxLength={1000} value={form.setupDescription || ""} onChange={event => update("setupDescription")(event.target.value)} placeholder="Ex. Je crée un serveur Minecraft survie avec une équipe de builders, des candidatures, des tickets et des salons vocaux temporaires…"/></label><button className="setup-button" disabled={(form.setupDescription || "").trim().length < 20 || isDesigning} onClick={designServer}>{isDesigning ? "Génération en cours…" : "Générer l’aperçu"}</button>{blueprint && <div className="setup-proposal"><div className="setup-proposal-head"><div><strong>Proposition prête</strong><span>{blueprint.roles.length} rôles · {blueprint.categories.length} catégories · {blueprint.channels.length} salons</span></div><button type="button" onClick={deletePreview}>Supprimer l’aperçu</button></div><small>{blueprint.detectedNeeds.join(" · ")}</small>{blueprint.explanations?.length ? <ul className="setup-reasons">{blueprint.explanations.slice(0, 6).map(item => <li key={item.categoryKey}><b>{item.name}</b><span>{item.reason}</span></li>)}</ul> : null}<BlueprintPreview blueprint={blueprint}/></div>}</div><div className="setup-audit"><div><p className="eyebrow">AUDIT DU SERVEUR</p><h2>{data.guild.name}</h2><p>{blueprint ? "FyxBot compare le serveur à votre proposition personnalisée avant toute action." : "Décrivez d’abord le serveur pour remplacer l’analyse générique par votre proposition personnalisée."}</p>{analysis.uneditableRoles.length > 0 && <p className="setup-warning">⚠️ Placez le rôle FyxBot au-dessus de {analysis.uneditableRoles.join(", ")} pour permettre leur correction.</p>}</div><div className="setup-metrics"><article><span>MANQUANTS</span><strong>{analysis.totals.missing}</strong><small>{missing.slice(0, 3).join(" · ") || "Structure complète"}</small></article><article><span>PERMISSIONS</span><strong>{analysis.totals.permissionIssues}</strong><small>{analysis.permissionIssues.slice(0, 3).join(" · ") || "Permissions conformes"}</small></article><article><span>CONSERVÉS</span><strong>{analysis.totals.extras}</strong><small>{extras.slice(0, 3).join(" · ") || "Aucun élément supplémentaire"}</small></article></div></div>{simulation && <FyxVisionWorkspace simulation={simulation} mode={mode}/>}<div className={`setup-action ${mode === "reset" ? "danger-panel" : ""}`}><div><p className="eyebrow">ACTION RECOMMANDÉE</p><h2>{blueprint ? analysis.recommendation === "complete" ? "Compléter la structure" : analysis.recommendation === "synchronize" ? "Corriger les permissions" : analysis.recommendation === "hierarchy" ? "Corriger la hiérarchie des rôles" : "Structure déjà exploitable" : "Aucune proposition appliquable"}</h2><p>{!blueprint ? "Générez un aperçu ci-dessus avant de pouvoir modifier Discord." : analysis.recommendation === "hierarchy" ? "Discord bloque les rôles supérieurs à FyxBot. Déplacez le rôle du bot puis relancez Réparer et synchroniser." : labels[mode].description}</p></div><label>Action<select value={mode} onChange={event => { update("setupMode")(event.target.value); update("setupConfirmation")(''); }}><option value="complete">Compléter sans supprimer</option><option value="synchronize">Réparer et synchroniser</option><option value="reset">Tout sauvegarder et reconstruire</option></select></label><label>Confirmation<input value={form.setupConfirmation || ""} onChange={event => update("setupConfirmation")(event.target.value)} placeholder={`Écrivez ${expected}`}/></label><button className={`setup-button ${mode === "reset" ? "danger-button" : ""}`} disabled={!blueprint || form.setupConfirmation !== expected} onClick={() => runSetup(mode)}>{labels[mode].action}</button></div></section>;
+    return <section className="setup-workspace"><div className="bot-identity-settings"><div className="bot-identity-preview"><span>F</span><div><p className="eyebrow">IDENTITÉ SUR CE SERVEUR</p><h2>{desiredNickname || "FyxBot"}</h2><small>Application FyxBot · surnom visible uniquement sur {data.guild.name}</small></div></div><div className="bot-identity-form"><label>Surnom du bot<input value={form.botNickname || ""} maxLength={32} onChange={event => { update("botNickname")(event.target.value); update("botNicknameConfirmation")(''); }} placeholder="Laisser vide pour afficher FyxBot"/></label><label>Confirmation<input value={form.botNicknameConfirmation || ""} onChange={event => update("botNicknameConfirmation")(event.target.value)} placeholder={`Écrivez ${nicknameConfirmation}`}/></label><button type="button" disabled={!nicknameChanged || form.botNicknameConfirmation !== nicknameConfirmation} onClick={() => saveNickname(desiredNickname, form.botNicknameConfirmation || "")}>{desiredNickname ? "Appliquer le surnom" : "Revenir à FyxBot"}</button></div><p>Le nom global, le badge d’application et les liens officiels restent FyxBot afin que les membres puissent toujours identifier le bot.</p></div><div className="setup-designer"><div><p className="eyebrow">SERVEUR SUR MESURE</p><h2>Décrivez ce que vous voulez</h2><p>Aucun profil n’est imposé. Expliquez l’objectif du serveur, son public, ses activités et les fonctions nécessaires. FyxBot proposera les rôles, catégories et salons adaptés.</p></div><label>Description libre<textarea rows={5} maxLength={1000} value={form.setupDescription || ""} onChange={event => update("setupDescription")(event.target.value)} placeholder="Ex. Je crée un serveur Minecraft survie avec une équipe de builders, des candidatures, des tickets et des salons vocaux temporaires…"/></label><button className="setup-button" disabled={(form.setupDescription || "").trim().length < 20 || isDesigning} onClick={designServer}>{isDesigning ? "Génération en cours…" : "Générer l’aperçu"}</button>{blueprint && <div className="setup-proposal"><div className="setup-proposal-head"><div><strong>Proposition prête</strong><span>{blueprint.roles.length} rôles · {blueprint.categories.length} catégories · {blueprint.channels.length} salons</span></div><button type="button" onClick={deletePreview}>Supprimer l’aperçu</button></div><small>{blueprint.detectedNeeds.join(" · ")}</small>{blueprint.explanations?.length ? <ul className="setup-reasons">{blueprint.explanations.slice(0, 6).map(item => <li key={item.categoryKey}><b>{item.name}</b><span>{item.reason}</span></li>)}</ul> : null}<BlueprintPreview blueprint={blueprint}/></div>}</div><div className="setup-audit"><div><p className="eyebrow">AUDIT DU SERVEUR</p><h2>{data.guild.name}</h2><p>{blueprint ? "FyxBot compare le serveur à votre proposition personnalisée avant toute action." : "Décrivez d’abord le serveur pour remplacer l’analyse générique par votre proposition personnalisée."}</p>{analysis.uneditableRoles.length > 0 && <p className="setup-warning">⚠️ Placez le rôle FyxBot au-dessus de {analysis.uneditableRoles.join(", ")} pour permettre leur correction.</p>}</div><div className="setup-metrics"><article><span>MANQUANTS</span><strong>{analysis.totals.missing}</strong><small>{missing.slice(0, 3).join(" · ") || "Structure complète"}</small></article><article><span>PERMISSIONS</span><strong>{analysis.totals.permissionIssues}</strong><small>{analysis.permissionIssues.slice(0, 3).join(" · ") || "Permissions conformes"}</small></article><article><span>CONSERVÉS</span><strong>{analysis.totals.extras}</strong><small>{extras.slice(0, 3).join(" · ") || "Aucun élément supplémentaire"}</small></article></div></div>{simulation && <FyxVisionWorkspace simulation={simulation} mode={mode}/>}<RolePerspectiveWorkspace key={data.guild.id} guildId={data.guild.id} roles={data.options.permissionRoles}/><div className={`setup-action ${mode === "reset" ? "danger-panel" : ""}`}><div><p className="eyebrow">ACTION RECOMMANDÉE</p><h2>{blueprint ? analysis.recommendation === "complete" ? "Compléter la structure" : analysis.recommendation === "synchronize" ? "Corriger les permissions" : analysis.recommendation === "hierarchy" ? "Corriger la hiérarchie des rôles" : "Structure déjà exploitable" : "Aucune proposition appliquable"}</h2><p>{!blueprint ? "Générez un aperçu ci-dessus avant de pouvoir modifier Discord." : analysis.recommendation === "hierarchy" ? "Discord bloque les rôles supérieurs à FyxBot. Déplacez le rôle du bot puis relancez Réparer et synchroniser." : labels[mode].description}</p></div><label>Action<select value={mode} onChange={event => { update("setupMode")(event.target.value); update("setupConfirmation")(''); }}><option value="complete">Compléter sans supprimer</option><option value="synchronize">Réparer et synchroniser</option><option value="reset">Tout sauvegarder et reconstruire</option></select></label><label>Confirmation<input value={form.setupConfirmation || ""} onChange={event => update("setupConfirmation")(event.target.value)} placeholder={`Écrivez ${expected}`}/></label><button className={`setup-button ${mode === "reset" ? "danger-button" : ""}`} disabled={!blueprint || form.setupConfirmation !== expected} onClick={() => runSetup(mode)}>{labels[mode].action}</button></div></section>;
 }
 function OnboardingDashboard({ data, navigate }: {
     data: State;
@@ -885,7 +1078,27 @@ function OnboardingDashboard({ data, navigate }: {
 }) {
     const recommended = data.onboarding.recommendedStep;
     const healthLabels = { new: "Nouveau serveur", starting: "Fondations en cours", progressing: "Configuration avancée", ready: "Serveur prêt" };
-    return <section className="onboarding-workspace"><div className="onboarding-summary"><div><p className="eyebrow">FYXJOURNEY · PARCOURS GUIDÉ</p><h2>{data.onboarding.complete ? "Votre configuration essentielle est prête" : "Préparons votre serveur étape par étape"}</h2><p>{data.onboarding.completedCount}/{data.onboarding.totalCount} étapes terminées sur {data.guild.name}.</p><span className={`journey-health ${data.onboarding.healthLevel}`}>{healthLabels[data.onboarding.healthLevel]}</span></div><strong>{data.onboarding.percent}%</strong><div className="onboarding-progress"><i style={{ width: `${data.onboarding.percent}%` }}/></div></div>{recommended && <div className="journey-next"><span>PROCHAINE ACTION RECOMMANDÉE</span><div><strong>{recommended.title}</strong><p>{recommended.description}</p></div><button type="button" onClick={() => navigate(recommended.target)}>Continuer →</button></div>}<div className="onboarding-steps">{data.onboarding.steps.map((step, index) => <article className={step.complete ? "complete" : recommended?.key === step.key ? "recommended" : ""} key={step.key}><span>{step.complete ? "✓" : index + 1}</span><div><strong>{step.title}</strong><p>{step.description}</p></div><button onClick={() => navigate(step.target)}>{step.complete ? "Vérifier" : "Configurer"}</button></article>)}</div></section>;
+    const statusLabels = { complete: "Prêt", attention: "À corriger", missing: "À configurer" };
+    return <section className="onboarding-workspace">
+        <div className="onboarding-summary">
+            <div>
+                <p className="eyebrow">FYXJOURNEY · DIAGNOSTIC EXPLICABLE</p>
+                <h2>{data.onboarding.complete ? "Votre serveur possède ses fondations essentielles" : "Voici les prochaines améliorations utiles"}</h2>
+                <p>Le score combine structure, sécurité, règlement, accueil, support et animation sur {data.guild.name}.</p>
+                <span className={`journey-health ${data.onboarding.healthLevel}`}>{healthLabels[data.onboarding.healthLevel]}</span>
+            </div>
+            <strong>{data.onboarding.healthScore}<small>/100</small></strong>
+            <div className="onboarding-progress" aria-label={`Score FyxJourney ${data.onboarding.healthScore} sur 100`}><i style={{ width: `${data.onboarding.healthScore}%` }}/></div>
+        </div>
+        <div className="journey-summary" aria-label="Résumé du diagnostic">
+            <article><strong>{data.onboarding.summary.ready}</strong><span>domaines prêts</span></article>
+            <article><strong>{data.onboarding.summary.attention}</strong><span>à corriger</span></article>
+            <article><strong>{data.onboarding.summary.missing}</strong><span>à configurer</span></article>
+        </div>
+        {recommended ? <div className="journey-next"><span>PROCHAINE ACTION RECOMMANDÉE</span><div><strong>{recommended.title}</strong><p>{recommended.impact}</p>{recommended.issues[0] && <small>{recommended.issues[0]}</small>}</div><button type="button" onClick={() => navigate(recommended.target)}>Continuer →</button></div> : <div className="journey-ready"><span aria-hidden="true">✓</span><div><strong>Aucune action essentielle en attente</strong><p>FyxJourney continuera de surveiller les réglages visibles par FyxBot.</p></div></div>}
+        {data.onboarding.recommendations.length > 1 && <section className="journey-plan"><header><div><p className="eyebrow">PLAN CONSEILLÉ</p><h3>Les trois prochaines actions</h3></div><span>Aucune modification automatique</span></header><div>{data.onboarding.recommendations.map((item, index) => <button type="button" key={item.key} onClick={() => navigate(item.target)}><span>{index + 1}</span><div><strong>{item.title}</strong><small>{item.issues[0] || item.description}</small></div><b>Ouvrir →</b></button>)}</div></section>}
+        <section className="journey-diagnostics"><header><div><p className="eyebrow">AUDIT PAR DOMAINE</p><h3>Pourquoi ce score ?</h3></div><span>{data.onboarding.completedCount}/{data.onboarding.totalCount} domaines prêts</span></header><div className="onboarding-steps">{data.onboarding.diagnostics.map((step, index) => <article className={`${step.status} ${recommended?.key === step.key ? "recommended" : ""}`} key={step.key}><span>{step.complete ? "✓" : index + 1}</span><div><div className="journey-step-head"><strong>{step.title}</strong><em className={step.status}>{statusLabels[step.status]} · {step.score}/{step.maxScore}</em></div><p>{step.impact}</p>{step.issues[0] && <small>{step.issues[0]}</small>}</div><button type="button" onClick={() => navigate(step.target)}>{step.complete ? "Vérifier" : "Améliorer"}</button></article>)}</div></section>
+    </section>;
 }
 function FyxPilotDashboard({ data, rollback, navigate }: {
     data: State;
@@ -939,10 +1152,15 @@ function PilotageDashboard({ data, form, update, runSetup, deletePreview, saveNi
     ];
     return <section className="pilotage-workspace"><header className="pilotage-intro"><div><p className="eyebrow">FYXPILOT · CENTRE DE CONFIGURATION</p><h2>Un seul espace pour construire et faire évoluer votre serveur</h2><p>Suivez le parcours recommandé, adaptez la structure Discord et retrouvez chaque modification réversible.</p></div><strong>{data.onboarding.percent}%<small>configuration terminée</small></strong></header><div className="pilotage-tabs" role="tablist" aria-label="Outils de pilotage">{tabs.map(tab => <button type="button" role="tab" aria-selected={section === tab.id} className={section === tab.id ? "active" : ""} key={tab.id} onClick={() => setSection(tab.id)}><span aria-hidden="true">{tab.icon}</span><div><strong>{tab.label}</strong><small>{tab.detail}</small></div></button>)}</div><div className="pilotage-content" role="tabpanel">{section === "journey" && <OnboardingDashboard data={data} navigate={openTarget}/>} {section === "setup" && <SetupDashboard data={data} form={form} update={update} runSetup={runSetup} deletePreview={deletePreview} saveNickname={saveNickname}/>} {section === "history" && <FyxPilotDashboard data={data} rollback={rollback} navigate={openTarget}/>}</div></section>;
 }
-function PremiumDashboard({ premium, guildName, activate, busy }: {
+function PremiumDashboard({ premium, guildName, assignableRoles, form, update, activate, configureRoles, disableRoles, busy }: {
     premium: PremiumState;
     guildName: string;
+    assignableRoles: Option[];
+    form: Record<string, string>;
+    update: (key: string) => (value: string) => void;
     activate: () => Promise<void>;
+    configureRoles: () => Promise<void>;
+    disableRoles: () => Promise<void>;
     busy: boolean;
 }) {
     const founder = premium.founder;
@@ -954,7 +1172,9 @@ function PremiumDashboard({ premium, guildName, activate, busy }: {
     const disabled = busy || activeHere || (!partnerReady && (founder.userExpired || (!founder.userClaimed && !founder.available)));
     const buttonLabel = activeHere ? expiration ? `Actif jusqu’au ${expiration}` : "Actif sans échéance" : partnerReady ? `Appliquer l’accès partenaire à ${guildName}` : founder.userActive ? `Appliquer à ${guildName}` : founder.userExpired ? "Accès Fondateur terminé" : founder.available ? "Activer 30 jours gratuitement" : "100 accès déjà attribués";
     const bridgeStatus = premium.entitlementConfigured ? premium.entitlementActive ? `Droit Discord${premium.entitlementTest ? " de test" : ""} détecté` : "Passerelle Discord prête, aucun droit payant actif" : "La facturation Discord reste désactivée";
-    return <section className="premium-workspace"><div className="premium-intro"><div><p className="eyebrow">ACCÈS PREMIUM FYXBOT</p><h2>{manual.userActive ? "Votre accès partenaire est prêt" : "30 jours offerts aux 100 premiers utilisateurs"}</h2><p>{manual.userActive ? "Cet accès offert peut être appliqué aux serveurs que vous administrez, sans paiement." : "Aucune carte bancaire n’est demandée et aucun abonnement ne démarre automatiquement. À l’échéance, le serveur revient simplement à Free."}</p></div><span>💎 {manual.userActive ? "PARTENAIRE" : `${founder.remaining}/${founder.limit} places`}</span></div><div className="founder-offer"><div><strong>{activeHere ? "Premium actif" : manual.userActive ? "Accès partenaire disponible" : founder.userActive ? "Votre accès est prêt" : "Offre de lancement"}</strong><p>{activeHere ? expiration ? `Ce serveur bénéficie de Premium jusqu’au ${expiration}.` : "Ce serveur bénéficie de Premium sans échéance." : manual.userActive ? `Appliquez votre accès partenaire à ${guildName}.` : founder.userActive && expiration ? `Votre compte est Premium jusqu’au ${expiration}. Vous pouvez appliquer cet accès aux serveurs que vous administrez.` : `Activez l’offre sur ${guildName}. Les réglages Premium resteront conservés après l’échéance, sans nouvelle création au-delà des limites Free.`}</p><small>Aucun moyen de paiement requis · Aucun renouvellement automatique · Aucun prélèvement</small></div><button type="button" disabled={disabled} onClick={() => void activate()}>{busy ? "Activation…" : buttonLabel}</button></div><div className="premium-plans">{premium.plans.map(plan => <article className={plan.id === "premium" ? "featured" : ""} key={plan.id}><small>{plan.id === premium.plan ? "FORFAIT ACTUEL" : "COMPARAISON"}</small><h3>{plan.name}</h3><p>{plan.description}</p><ul>{plan.features.map(feature => <li key={feature}>✓ {feature}</li>)}</ul><button disabled>{plan.id === premium.plan ? "Actif" : plan.id === "premium" ? "Via un accès éligible" : "Inclus"}</button></article>)}</div><p className="premium-note"><strong>État technique :</strong> {bridgeStatus}. Les accès offerts restent séparés du futur abonnement Discord et sont révocables uniquement par le propriétaire.</p></section>;
+    const rolesConfigured = Boolean(premium.roleConfig.paidRoleId && premium.roleConfig.complimentaryRoleId);
+    const rolesReady = Boolean(form.premiumPaidRoleId && form.premiumComplimentaryRoleId && form.premiumPaidRoleId !== form.premiumComplimentaryRoleId);
+    return <section className="premium-workspace"><div className="premium-intro"><div><p className="eyebrow">ACCÈS PREMIUM FYXBOT</p><h2>{manual.userActive ? "Votre accès partenaire est prêt" : "30 jours offerts aux 100 premiers utilisateurs"}</h2><p>{manual.userActive ? "Cet accès offert peut être appliqué aux serveurs que vous administrez, sans paiement." : "Aucune carte bancaire n’est demandée et aucun abonnement ne démarre automatiquement. À l’échéance, le serveur revient simplement à Free."}</p></div><span>💎 {manual.userActive ? "PARTENAIRE" : `${founder.remaining}/${founder.limit} places`}</span></div><div className="founder-offer"><div><strong>{activeHere ? "Premium actif" : manual.userActive ? "Accès partenaire disponible" : founder.userActive ? "Votre accès est prêt" : "Offre de lancement"}</strong><p>{activeHere ? expiration ? `Ce serveur bénéficie de Premium jusqu’au ${expiration}.` : "Ce serveur bénéficie de Premium sans échéance." : manual.userActive ? `Appliquez votre accès partenaire à ${guildName}.` : founder.userActive && expiration ? `Votre compte est Premium jusqu’au ${expiration}. Vous pouvez appliquer cet accès aux serveurs que vous administrez.` : `Activez l’offre sur ${guildName}. Les réglages Premium resteront conservés après l’échéance, sans nouvelle création au-delà des limites Free.`}</p><small>Aucun moyen de paiement requis · Aucun renouvellement automatique · Aucun prélèvement</small></div><button type="button" disabled={disabled} onClick={() => void activate()}>{busy ? "Activation…" : buttonLabel}</button></div><div className="premium-role-panel"><div><p className="eyebrow">RÔLES DISCORD AUTOMATIQUES</p><h2>Reconnaître les membres Premium</h2><p>Choisissez deux rôles sans permissions sensibles. FyxBot les attribue, les remplace et les retire automatiquement selon l’accès réel de chaque membre.</p></div><div className="premium-role-status"><article className={premium.roleConfig.paidRoleId ? "ready" : ""}><span aria-hidden="true">💎</span><div><strong>Client Premium</strong><small>{premium.roleConfig.paidRoleId ? "Synchronisation active" : "Rôle non configuré"}</small></div></article><article className={premium.roleConfig.complimentaryRoleId ? "ready" : ""}><span aria-hidden="true">🎁</span><div><strong>Premium offert</strong><small>{premium.roleConfig.complimentaryRoleId ? "Synchronisation active" : "Rôle non configuré"}</small></div></article></div><div className="premium-role-form"><Select label="Abonnement payant" value={form.premiumPaidRoleId || ""} options={[{ id: "", name: "Choisir un rôle" }, ...assignableRoles]} onChange={update("premiumPaidRoleId")}/><Select label="Accès offert ou partenaire" value={form.premiumComplimentaryRoleId || ""} options={[{ id: "", name: "Choisir un rôle" }, ...assignableRoles]} onChange={update("premiumComplimentaryRoleId")}/><button type="button" disabled={busy || !rolesReady} onClick={() => void configureRoles()}>{rolesConfigured ? "Mettre à jour et synchroniser" : "Activer et synchroniser"}</button>{rolesConfigured && <button type="button" className="secondary danger" disabled={busy} onClick={() => void disableRoles()}>Désactiver</button>}</div>{form.premiumPaidRoleId && form.premiumPaidRoleId === form.premiumComplimentaryRoleId && <p className="premium-role-warning" role="alert">Choisissez deux rôles différents.</p>}<small className="premium-role-help">Le rôle FyxBot doit rester placé au-dessus de ces deux rôles dans la hiérarchie Discord.</small></div><div className="premium-plans">{premium.plans.map(plan => <article className={plan.id === "premium" ? "featured" : ""} key={plan.id}><small>{plan.id === premium.plan ? "FORFAIT ACTUEL" : "COMPARAISON"}</small><h3>{plan.name}</h3><p>{plan.description}</p><ul>{plan.features.map(feature => <li key={feature}>✓ {feature}</li>)}</ul><button disabled>{plan.id === premium.plan ? "Actif" : plan.id === "premium" ? "Via un accès éligible" : "Inclus"}</button></article>)}</div><p className="premium-note"><strong>État technique :</strong> {bridgeStatus}. Les accès offerts restent séparés du futur abonnement Discord et sont révocables uniquement par le propriétaire.</p></section>;
 }
 function CommunityDashboard({ data, form, update, createEvent, createGiveaway, navigate }: {
     data: State;
@@ -1010,8 +1230,42 @@ const supportCategoryLabels: Record<string, string> = {
     other: "Autre demande",
 };
 const SUPPORT_DEEP_LINK_KEY = "fyxbot-pending-support-category";
+const SUPPORT_REQUEST_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACTIVE_VIEW_KEY = "fyxbot-dashboard-active-view";
+const SELECTED_GUILD_STORAGE_KEY = "fyxbot-selected-guild";
 const supportDeepLinkCategories = new Set(["technical", "configuration", "billing", "abuse", "privacy", "security", "other"]);
+function initialSelectedGuild() {
+    if (typeof window === "undefined")
+        return "";
+    const requested = new URLSearchParams(window.location.search).get("guildId") || "";
+    if (/^\d{17,20}$/.test(requested))
+        return requested;
+    try {
+        const stored = window.sessionStorage.getItem(SELECTED_GUILD_STORAGE_KEY) || "";
+        return /^\d{17,20}$/.test(stored) ? stored : "";
+    }
+    catch {
+        return "";
+    }
+}
+function persistSelectedGuild(guildId: string) {
+    if (typeof window === "undefined" || !/^\d{17,20}$/.test(guildId))
+        return;
+    try { window.sessionStorage.setItem(SELECTED_GUILD_STORAGE_KEY, guildId); }
+    catch { /* Le paramètre d’URL conserve malgré tout la sélection. */ }
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.set("guildId", guildId);
+    window.history.replaceState({}, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+}
+function clearSelectedGuild() {
+    if (typeof window === "undefined")
+        return;
+    try { window.sessionStorage.removeItem(SELECTED_GUILD_STORAGE_KEY); }
+    catch { /* La sélection en mémoire est facultative. */ }
+    const nextUrl = new URL(window.location.href);
+    nextUrl.searchParams.delete("guildId");
+    window.history.replaceState({}, "", `${nextUrl.pathname}${nextUrl.search}${nextUrl.hash}`);
+}
 function initialSupportCategory() {
     if (typeof window === "undefined")
         return "";
@@ -1024,7 +1278,37 @@ function initialSupportCategory() {
     const category = supportDeepLinkCategories.has(requested) ? requested : pending;
     return supportDeepLinkCategories.has(category) ? category : "";
 }
-function SupportDashboard({ workspace, conversation, composing, form, update, selectRequest, startRequest, createRequest, reply, updateRequest }: {
+function initialSupportRequestId() {
+    if (typeof window === "undefined")
+        return "";
+    const id = new URLSearchParams(window.location.search).get("supportRequest") || "";
+    return SUPPORT_REQUEST_ID_PATTERN.test(id) ? id : "";
+}
+function SupportCloseAction({ request, closeRequest, reopenRequest, deleteRequest, canDeleteRequest, closingRequest, reopeningRequest, deletingRequest }: {
+    request: SupportRequest;
+    closeRequest: () => void;
+    reopenRequest: () => void;
+    deleteRequest: () => void;
+    canDeleteRequest: boolean;
+    closingRequest: boolean;
+    reopeningRequest: boolean;
+    deletingRequest: boolean;
+}) {
+    const archived = request.status === "closed" || request.status === "resolved";
+    const expiration = request.expiresAt ? new Date(request.expiresAt).toLocaleDateString("fr-FR") : null;
+    const reopenLimit = request.reopenUntil ? new Date(request.reopenUntil).toLocaleDateString("fr-FR") : null;
+    return <div className={`support-close-action${archived ? " is-closed" : ""}`}>
+        <p>{archived
+            ? <>Cette demande est archivée{expiration ? ` jusqu’au ${expiration}` : " pendant 90 jours"}. {request.canReopen && reopenLimit ? `Vous pouvez la rouvrir jusqu’au ${reopenLimit}.` : "Le délai de réouverture est terminé."}</>
+            : "Le problème est réglé ? Fermez la demande pour la retirer des demandes actives. Son historique sera conservé pendant 90 jours."}</p>
+        <div className="support-lifecycle-actions">
+            {!archived && <button type="button" disabled={closingRequest} onClick={closeRequest}>{closingRequest ? "Fermeture…" : "Fermer la demande"}</button>}
+            {archived && request.canReopen && <button type="button" disabled={reopeningRequest || deletingRequest} onClick={reopenRequest}>{reopeningRequest ? "Réouverture…" : "Rouvrir"}</button>}
+            {archived && canDeleteRequest && <button type="button" className="danger" disabled={deletingRequest || reopeningRequest} onClick={deleteRequest}>{deletingRequest ? "Suppression…" : "Supprimer maintenant"}</button>}
+        </div>
+    </div>;
+}
+function SupportDashboard({ workspace, conversation, composing, form, update, selectRequest, startRequest, createRequest, reply, updateRequest, closeRequest, reopenRequest, deleteRequest, closingRequest, reopeningRequest, deletingRequest }: {
     workspace: SupportWorkspace | null;
     conversation: SupportConversation | null;
     composing: boolean;
@@ -1035,16 +1319,26 @@ function SupportDashboard({ workspace, conversation, composing, form, update, se
     createRequest: () => void;
     reply: () => void;
     updateRequest: () => void;
+    closeRequest: () => void;
+    reopenRequest: () => void;
+    deleteRequest: () => void;
+    closingRequest: boolean;
+    reopeningRequest: boolean;
+    deletingRequest: boolean;
 }) {
+    const [onlyActionable, setOnlyActionable] = useState(false);
     if (!workspace)
         return <section className="support-workspace"><div className="support-loading"><span>🛟</span><h2>Chargement du support FyxBot…</h2></div></section>;
-    const access = workspace.access || { role: workspace.ownerAccess ? "owner" : "user", canViewAll: workspace.ownerAccess, canReplyAsStaff: workspace.ownerAccess, canManageStatus: workspace.ownerAccess, canManagePriority: workspace.ownerAccess, canManageTeam: workspace.ownerAccess };
+    const access = workspace.access || { role: workspace.ownerAccess ? "owner" : "user", canViewAll: workspace.ownerAccess, canReplyAsStaff: workspace.ownerAccess, canManageStatus: workspace.ownerAccess, canManagePriority: workspace.ownerAccess, canDeleteRequests: workspace.ownerAccess, canManageTeam: workspace.ownerAccess };
     const teamAccess = access.canViewAll;
     const accessLabel = access.role === "owner" ? "Propriétaire" : access.role === "administrator" ? "Administrateur Support" : access.role === "moderator" ? "Modérateur Support" : null;
+    const actionable = (request: SupportRequest) => ["open", "in_progress", "waiting_user"].includes(request.status)
+        && request.lastAuthorRole === (teamAccess ? "user" : "staff");
+    const visibleRequests = onlyActionable ? workspace.requests.filter(actionable) : workspace.requests;
     return <section className="support-workspace">
-        <div className="support-summary"><div><p className="eyebrow">CENTRE D’ASSISTANCE</p><h2>{teamAccess ? "Boîte de réception FyxBot" : "Vos demandes à l’équipe FyxBot"}</h2><p>{teamAccess ? "Suivez les demandes de tous les serveurs depuis un espace privé." : "Expliquez votre problème et retrouvez les réponses sans quitter le panel."}</p>{accessLabel && <b className={`support-access-badge ${access.role}`}>{accessLabel}</b>}</div><div className="support-metrics"><article><strong>{workspace.counts.open}</strong><small>actives</small></article><article><strong>{workspace.counts.urgent}</strong><small>urgentes</small></article><article><strong>{workspace.counts.total}</strong><small>affichées</small></article></div>{workspace.supportUrl && <a href={workspace.supportUrl} target="_blank" rel="noreferrer">Serveur d’assistance ↗</a>}</div>
-        <div className="support-layout"><div className="support-inbox"><header><div><p className="eyebrow">DEMANDES</p><h3>{teamAccess ? "Tous les serveurs" : "Mon historique"}</h3></div><button type="button" onClick={startRequest}>+ Nouvelle</button></header><div className="support-request-list">{workspace.requests.length === 0 ? <p className="support-empty">Aucune demande pour le moment.</p> : workspace.requests.map(request => <button type="button" className={conversation?.request.id === request.id && !composing ? "selected" : ""} key={request.id} onClick={() => selectRequest(request.id)}><span className={`support-priority ${request.priority}`}/><div><strong>{request.subject}</strong><small>{request.guildName} · {request.requesterName}</small><em>{new Date(request.updatedAt).toLocaleString("fr-FR")}</em></div><b className={`support-status ${request.status}`}>{supportStatusLabels[request.status]}</b></button>)}</div></div>
-            <div className="support-detail">{composing ? <><header><div><p className="eyebrow">NOUVELLE DEMANDE</p><h2>Comment pouvons-nous vous aider ?</h2><p>Ne transmettez jamais de mot de passe, jeton Discord ou code d’authentification.</p></div><span>📝</span></header><div className="support-form"><label>Catégorie<select value={form.supportCategory || "technical"} onChange={event => update("supportCategory")(event.target.value)}>{Object.entries(supportCategoryLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Priorité<select value={form.supportPriority || "normal"} onChange={event => update("supportPriority")(event.target.value)}>{Object.entries(supportPriorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label className="full-row">Sujet<input maxLength={120} value={form.supportSubject || ""} onChange={event => update("supportSubject")(event.target.value)} placeholder="Ex. La commande /setup ne répond plus"/></label><label className="full-row">Description<textarea rows={8} maxLength={4000} value={form.supportMessage || ""} onChange={event => update("supportMessage")(event.target.value)} placeholder="Décrivez les étapes, le résultat obtenu et le résultat attendu…"/></label><button type="button" disabled={(form.supportSubject || "").trim().length < 5 || (form.supportMessage || "").trim().length < 20} onClick={createRequest}>Envoyer la demande</button></div></> : conversation ? <><header className="support-conversation-head"><div><p className="eyebrow">{supportCategoryLabels[conversation.request.category] || "DEMANDE"}</p><h2>{conversation.request.subject}</h2><p>{conversation.request.guildName} · créée par {conversation.request.requesterName} le {new Date(conversation.request.createdAt).toLocaleString("fr-FR")}</p></div><div><b className={`support-status ${conversation.request.status}`}>{supportStatusLabels[conversation.request.status]}</b><b className={`support-priority-label ${conversation.request.priority}`}>{supportPriorityLabels[conversation.request.priority]}</b></div></header>{access.canManageStatus && <div className="support-owner-controls"><label>Statut<select value={form.supportStatus || conversation.request.status} onChange={event => update("supportStatus")(event.target.value)}>{Object.entries(supportStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{access.canManagePriority && <label>Priorité<select value={form.supportManagePriority || conversation.request.priority} onChange={event => update("supportManagePriority")(event.target.value)}>{Object.entries(supportPriorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>}<button type="button" onClick={updateRequest}>Mettre à jour</button></div>}<div className="support-thread">{conversation.messages.map(message => <article className={message.authorRole === "staff" ? "staff" : "user"} key={message.id}><div><span>{message.authorName.slice(0, 1).toUpperCase()}</span><strong>{message.authorName}</strong>{message.authorRole === "staff" && <b>ÉQUIPE FYXBOT</b>}<time>{new Date(message.createdAt).toLocaleString("fr-FR")}</time></div><p>{message.body}</p></article>)}</div><div className="support-reply"><label>Répondre<textarea rows={5} maxLength={4000} value={form.supportReply || ""} onChange={event => update("supportReply")(event.target.value)} placeholder="Votre réponse…"/></label><button type="button" disabled={(form.supportReply || "").trim().length < 2} onClick={reply}>Envoyer</button></div>{conversation.events.length > 1 && <details className="support-history"><summary>Historique de la demande</summary>{conversation.events.slice(1).map(event => <p key={event.id}><strong>{event.actorName}</strong> · {event.detail}<time>{new Date(event.createdAt).toLocaleString("fr-FR")}</time></p>)}</details>}</> : <div className="support-empty-detail"><span>🛟</span><h2>Sélectionnez une demande</h2><p>Ouvrez une conversation existante ou créez une nouvelle demande.</p><button type="button" onClick={startRequest}>Créer une demande</button></div>}</div></div>
+        <div className="support-summary"><div><p className="eyebrow">CENTRE D’ASSISTANCE</p><h2>{teamAccess ? "Boîte de réception FyxBot" : "Vos demandes à l’équipe FyxBot"}</h2><p>{teamAccess ? "Suivez les demandes de tous les serveurs depuis un espace privé." : "Expliquez votre problème et retrouvez les réponses sans quitter le panel."}</p>{accessLabel && <b className={`support-access-badge ${access.role}`}>{accessLabel}</b>}</div><div className="support-metrics"><article className="support-action-metric"><strong>{workspace.counts.actionRequired}</strong><small>{teamAccess ? "à traiter" : "réponses"}</small></article><article><strong>{workspace.counts.open}</strong><small>actives</small></article><article><strong>{workspace.counts.urgent}</strong><small>urgentes</small></article></div>{workspace.supportUrl && <a href={workspace.supportUrl} target="_blank" rel="noreferrer">Serveur d’assistance ↗</a>}</div>
+        <div className="support-layout"><div className="support-inbox"><header><div><p className="eyebrow">DEMANDES</p><h3>{teamAccess ? "Tous les serveurs" : "Mon historique"}</h3></div><div className="support-inbox-actions"><button type="button" className={onlyActionable ? "active" : ""} aria-pressed={onlyActionable} onClick={() => setOnlyActionable(value => !value)}>{teamAccess ? "À traiter" : "Réponses"} ({workspace.counts.actionRequired})</button><button type="button" onClick={startRequest}>+ Nouvelle</button></div></header><div className="support-request-list">{visibleRequests.length === 0 ? <p className="support-empty">{onlyActionable ? "Aucune demande nécessitant votre attention." : "Aucune demande pour le moment."}</p> : visibleRequests.map(request => <button type="button" className={conversation?.request.id === request.id && !composing ? "selected" : ""} key={request.id} onClick={() => selectRequest(request.id)}><span className={`support-priority ${request.priority}`}/><div><strong>{request.subject}{actionable(request) && <span className="support-needs-action"> · À consulter</span>}</strong><small>{request.guildName} · {request.requesterName}</small><em>{new Date(request.updatedAt).toLocaleString("fr-FR")}</em></div><b className={`support-status ${request.status}`}>{supportStatusLabels[request.status]}</b></button>)}</div></div>
+            <div className="support-detail">{composing ? <><header><div><p className="eyebrow">NOUVELLE DEMANDE</p><h2>Comment pouvons-nous vous aider ?</h2><p>Ne transmettez jamais de mot de passe, jeton Discord ou code d’authentification.</p></div><span>📝</span></header><div className="support-form"><label>Catégorie<select value={form.supportCategory || "technical"} onChange={event => update("supportCategory")(event.target.value)}>{Object.entries(supportCategoryLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>Priorité<select value={form.supportPriority || "normal"} onChange={event => update("supportPriority")(event.target.value)}>{Object.entries(supportPriorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label className="full-row">Sujet<input maxLength={120} value={form.supportSubject || ""} onChange={event => update("supportSubject")(event.target.value)} placeholder="Ex. La commande /setup ne répond plus"/></label><label className="full-row">Description<textarea rows={8} maxLength={4000} value={form.supportMessage || ""} onChange={event => update("supportMessage")(event.target.value)} placeholder="Décrivez les étapes, le résultat obtenu et le résultat attendu…"/></label><button type="button" disabled={(form.supportSubject || "").trim().length < 5 || (form.supportMessage || "").trim().length < 20} onClick={createRequest}>Envoyer la demande</button></div></> : conversation ? <><header className="support-conversation-head"><div><p className="eyebrow">{supportCategoryLabels[conversation.request.category] || "DEMANDE"}</p><h2>{conversation.request.subject}</h2><p>{conversation.request.guildName} · créée par {conversation.request.requesterName} le {new Date(conversation.request.createdAt).toLocaleString("fr-FR")}</p></div><div><b className={`support-status ${conversation.request.status}`}>{supportStatusLabels[conversation.request.status]}</b><b className={`support-priority-label ${conversation.request.priority}`}>{supportPriorityLabels[conversation.request.priority]}</b></div></header><SupportCloseAction request={conversation.request} closeRequest={closeRequest} reopenRequest={reopenRequest} deleteRequest={deleteRequest} canDeleteRequest={!teamAccess || access.canDeleteRequests} closingRequest={closingRequest} reopeningRequest={reopeningRequest} deletingRequest={deletingRequest}/>{access.canManageStatus && <div className="support-owner-controls"><label>Statut<select value={form.supportStatus || conversation.request.status} onChange={event => update("supportStatus")(event.target.value)}>{Object.entries(supportStatusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>{access.canManagePriority && <label>Priorité<select value={form.supportManagePriority || conversation.request.priority} onChange={event => update("supportManagePriority")(event.target.value)}>{Object.entries(supportPriorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>}<button type="button" onClick={updateRequest}>Mettre à jour</button></div>}<div className="support-thread">{conversation.messages.map(message => <article className={message.authorRole === "staff" ? "staff" : "user"} key={message.id}><div><span>{message.authorName.slice(0, 1).toUpperCase()}</span><strong>{message.authorName}</strong>{message.authorRole === "staff" && <b>ÉQUIPE FYXBOT</b>}<time>{new Date(message.createdAt).toLocaleString("fr-FR")}</time></div><p>{message.body}</p></article>)}</div>{!["resolved", "closed"].includes(conversation.request.status) && <div className="support-reply"><label>Répondre<textarea rows={5} maxLength={4000} value={form.supportReply || ""} onChange={event => update("supportReply")(event.target.value)} placeholder="Votre réponse…"/></label><button type="button" disabled={(form.supportReply || "").trim().length < 2} onClick={reply}>Envoyer</button></div>}{conversation.events.length > 1 && <details className="support-history"><summary>Historique de la demande</summary>{conversation.events.slice(1).map(event => <p key={event.id}><strong>{event.actorName}</strong> · {event.detail}<time>{new Date(event.createdAt).toLocaleString("fr-FR")}</time></p>)}</details>}</> : <div className="support-empty-detail"><span>🛟</span><h2>Sélectionnez une demande</h2><p>Ouvrez une conversation existante ou créez une nouvelle demande.</p><button type="button" onClick={startRequest}>Créer une demande</button></div>}</div></div>
         <div className="support-faq"><div><p className="eyebrow">AVANT D’ÉCRIRE</p><h2>Réponses rapides</h2></div><article><strong>Une commande n’apparaît pas</strong><p>Vérifiez que FyxBot a été invité avec le droit d’utiliser les commandes, puis relancez la synchronisation globale.</p></article><article><strong>FyxBot refuse une action</strong><p>Placez son rôle au-dessus des rôles qu’il doit gérer et vérifiez ses permissions dans la catégorie concernée.</p></article><article><strong>Demande liée aux données</strong><p>Choisissez “Données personnelles” et indiquez votre identifiant Discord ainsi que le serveur concerné.</p></article></div>
     </section>;
 }
@@ -1054,7 +1348,10 @@ type DashboardProps = {
 
 export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
     const isV2 = variant === "v2";
-    const [active, setActiveState] = useState("Vue d’ensemble"), [data, setData] = useState<State | null>(null), [creatorStats, setCreatorStats] = useState<CreatorStats | null>(null), [supportStaff, setSupportStaff] = useState<SupportStaffMember[]>([]), [memberWarnings, setMemberWarnings] = useState<MemberWarning[] | null>(null), [supportWorkspace, setSupportWorkspace] = useState<SupportWorkspace | null>(null), [supportConversation, setSupportConversation] = useState<SupportConversation | null>(null), [supportComposing, setSupportComposing] = useState(false), [requestedSupportCategory, setRequestedSupportCategory] = useState(initialSupportCategory), [account, setAccount] = useState<Account | null>(null), [accountMenuOpen, setAccountMenuOpen] = useState(false), [mobileNavOpen, setMobileNavOpen] = useState(false), [selectedGuild, setSelectedGuild] = useState(""), [form, setForm] = useState<Record<string, string>>({}), [notice, setNotice] = useState("Connexion à FyxBot…"), [authenticated, setAuthenticated] = useState<boolean | null>(null), [csrfToken, setCsrfToken] = useState("");
+    const [active, setActiveState] = useState("Vue d’ensemble"), [data, setData] = useState<State | null>(null), [creatorStats, setCreatorStats] = useState<CreatorStats | null>(null), [supportStaff, setSupportStaff] = useState<SupportStaffMember[]>([]), [memberWarnings, setMemberWarnings] = useState<MemberWarning[] | null>(null), [supportWorkspace, setSupportWorkspace] = useState<SupportWorkspace | null>(null), [supportConversation, setSupportConversation] = useState<SupportConversation | null>(null), [supportComposing, setSupportComposing] = useState(false), [requestedSupportCategory, setRequestedSupportCategory] = useState(initialSupportCategory), [requestedSupportId, setRequestedSupportId] = useState(initialSupportRequestId), [account, setAccount] = useState<Account | null>(null), [accountMenuOpen, setAccountMenuOpen] = useState(false), [mobileNavOpen, setMobileNavOpen] = useState(false), [selectedGuild, setSelectedGuild] = useState(""), [form, setForm] = useState<Record<string, string>>({}), [notice, setNotice] = useState("Connexion à FyxBot…"), [authenticated, setAuthenticated] = useState<boolean | null>(null), [csrfToken, setCsrfToken] = useState("");
+    const [closingSupportRequest, setClosingSupportRequest] = useState(false);
+    const [reopeningSupportRequest, setReopeningSupportRequest] = useState(false);
+    const [deletingSupportRequest, setDeletingSupportRequest] = useState(false);
     const [interfaceMode, setInterfaceMode] = useState<InterfaceMode>("simple");
     const [favorites, setFavorites] = useState<string[]>([]);
     const [preferencesReady, setPreferencesReady] = useState(false);
@@ -1151,7 +1448,9 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
             window.removeEventListener("keydown", closeOnEscape);
         };
     }, [mobileNavOpen]);
-    const refresh = useCallback(async (guildId = "", hydrateForm = true) => {
+    const refresh = useCallback(async (guildId = initialSelectedGuild(), hydrateForm = true) => {
+        if (guildId)
+            setSelectedGuild(guildId);
         refreshController.current?.abort();
         const controller = new AbortController();
         refreshController.current = controller;
@@ -1173,6 +1472,7 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
             }
             setData(n);
             setSelectedGuild(n.guild.id);
+            persistSelectedGuild(n.guild.id);
             setNotice("");
             if (hydrateForm)
                 setForm({
@@ -1243,11 +1543,17 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
                     supportStaffUserId: "",
                     supportStaffRole: "moderator",
                     supportStaffConfirmation: "",
+                    premiumPaidRoleId: n.premium.roleConfig?.paidRoleId || "",
+                    premiumComplimentaryRoleId: n.premium.roleConfig?.complimentaryRoleId || "",
                 });
         }
         catch (error) {
             if (controller.signal.aborted || refreshController.current !== controller)
                 return;
+            if (guildId)
+                setData(current => current?.guild.id === guildId
+                    ? { ...current, bot: { ...current.bot, online: false } }
+                    : null);
             setNotice(error instanceof Error && error.message
                 ? error.message
                 : "Le bot FyxBot ou sa passerelle locale est indisponible.");
@@ -1315,19 +1621,19 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
         }
     }, []);
     useEffect(() => {
-        if (active !== "Assistance FyxBot" || !selectedGuild)
+        if (authenticated !== true || !selectedGuild)
             return;
         const initialTimer = window.setTimeout(() => void loadSupport(), 0);
         const timer = window.setInterval(() => {
             if (document.visibilityState === "visible")
                 void loadSupport();
-        }, 30000);
+        }, active === "Assistance FyxBot" ? 30000 : 60000);
         return () => {
             window.clearTimeout(initialTimer);
             window.clearInterval(timer);
         };
-    }, [active, selectedGuild, loadSupport]);
-    async function selectSupportRequest(requestId: string) {
+    }, [active, authenticated, selectedGuild, loadSupport]);
+    const selectSupportRequest = useCallback(async (requestId: string) => {
         setNotice("Chargement de la demande…");
         try {
             const query = new URLSearchParams({ id: requestId });
@@ -1343,7 +1649,20 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
         catch (error) {
             setNotice(error instanceof Error ? error.message : "Demande indisponible.");
         }
-    }
+    }, []);
+    useEffect(() => {
+        if (authenticated !== true || !selectedGuild || !requestedSupportId)
+            return;
+        const timer = window.setTimeout(() => {
+            setActive("Assistance FyxBot");
+            void selectSupportRequest(requestedSupportId);
+            setRequestedSupportId("");
+            const cleanUrl = new URL(window.location.href);
+            cleanUrl.searchParams.delete("supportRequest");
+            window.history.replaceState({}, "", `${cleanUrl.pathname}${cleanUrl.search}${cleanUrl.hash}`);
+        }, 0);
+        return () => window.clearTimeout(timer);
+    }, [authenticated, requestedSupportId, selectedGuild, selectSupportRequest, setActive]);
     function startSupportRequest() {
         setSupportConversation(null);
         setSupportComposing(true);
@@ -1401,6 +1720,77 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
             setNotice(error instanceof Error ? error.message : "Échec de la mise à jour.");
         }
     }
+    async function closeSupportRequest() {
+        const request = supportConversation?.request;
+        if (!request || request.status === "closed" || closingSupportRequest)
+            return;
+        if (!window.confirm("Fermer cette demande ? Elle restera dans l’historique et pourra être rouverte avec une nouvelle réponse."))
+            return;
+        setClosingSupportRequest(true);
+        setNotice("Fermeture de la demande…");
+        try {
+            const response = await fetch(`${API}/support/close`, { method: "POST", credentials: "include", headers: mutationHeaders(csrfToken), body: JSON.stringify({ requestId: request.id }) });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            await loadSupport();
+            await selectSupportRequest(request.id);
+            setNotice("✓ Demande fermée, historique conservé");
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Échec de la fermeture.");
+        }
+        finally {
+            setClosingSupportRequest(false);
+        }
+    }
+    async function reopenSupportRequest() {
+        const request = supportConversation?.request;
+        if (!request || !["resolved", "closed"].includes(request.status) || !request.canReopen || reopeningSupportRequest)
+            return;
+        setReopeningSupportRequest(true);
+        setNotice("Réouverture de la demande…");
+        try {
+            const response = await fetch(`${API}/support/reopen`, { method: "POST", credentials: "include", headers: mutationHeaders(csrfToken), body: JSON.stringify({ requestId: request.id }) });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            await loadSupport();
+            await selectSupportRequest(request.id);
+            setNotice("✓ Demande rouverte");
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Échec de la réouverture.");
+        }
+        finally {
+            setReopeningSupportRequest(false);
+        }
+    }
+    async function deleteSupportHistory() {
+        const request = supportConversation?.request;
+        if (!request || !["resolved", "closed"].includes(request.status) || deletingSupportRequest)
+            return;
+        const confirmation = window.prompt("Cette suppression est définitive. Écrivez SUPPRIMER pour effacer la demande et tous ses messages.");
+        if (confirmation !== "SUPPRIMER")
+            return;
+        setDeletingSupportRequest(true);
+        setNotice("Suppression définitive de la demande…");
+        try {
+            const response = await fetch(`${API}/support/delete`, { method: "POST", credentials: "include", headers: mutationHeaders(csrfToken), body: JSON.stringify({ requestId: request.id, confirmation }) });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            setSupportConversation(null);
+            await loadSupport();
+            setNotice("✓ Demande supprimée définitivement");
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Échec de la suppression.");
+        }
+        finally {
+            setDeletingSupportRequest(false);
+        }
+    }
     async function save(section: string, body: Record<string, string>) {
         setNotice("Enregistrement…");
         try {
@@ -1440,6 +1830,38 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
         }
         catch (error) {
             setNotice(error instanceof Error ? error.message : "Activation Premium impossible.");
+        }
+    }
+    async function configurePremiumMemberRoles() {
+        if (!data || !form.premiumPaidRoleId || !form.premiumComplimentaryRoleId)
+            return;
+        setNotice("Synchronisation des rôles Premium…");
+        try {
+            const response = await fetch(`${API}/premium/roles/configure`, { method: "POST", credentials: "include", headers: mutationHeaders(csrfToken), body: JSON.stringify({ guildId: selectedGuild, paidRoleId: form.premiumPaidRoleId, complimentaryRoleId: form.premiumComplimentaryRoleId }) });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            await refresh(selectedGuild);
+            setNotice(`✓ ${payload.message}`);
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Configuration des rôles Premium impossible.");
+        }
+    }
+    async function disablePremiumMemberRoles() {
+        if (!data || !window.confirm(`Désactiver les rôles Premium automatiques sur ${data.guild.name} ?\n\nLes rôles attribués par cette fonction seront retirés des membres.`))
+            return;
+        setNotice("Désactivation des rôles Premium…");
+        try {
+            const response = await fetch(`${API}/premium/roles/disable`, { method: "POST", credentials: "include", headers: mutationHeaders(csrfToken), body: JSON.stringify({ guildId: selectedGuild, confirmation: "DESACTIVER" }) });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            await refresh(selectedGuild);
+            setNotice(`✓ ${payload.message}`);
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Désactivation des rôles Premium impossible.");
         }
     }
     async function runSetup(mode: SetupMode | "design") {
@@ -1939,6 +2361,38 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
             setNotice(error instanceof Error ? error.message : "Révocation Premium impossible.");
         }
     }
+    async function leaveCreatorGuild(guildId: string, guildName: string) {
+        if (!window.confirm(`Retirer définitivement FyxBot de « ${guildName} » ? Le bot quittera le serveur et les données associées seront nettoyées.`))
+            return;
+        setNotice(`Retrait de FyxBot de ${guildName}…`);
+        try {
+            const response = await fetch(`${API}/creator/guilds/leave`, {
+                method: "POST",
+                credentials: "include",
+                headers: mutationHeaders(csrfToken),
+                body: JSON.stringify({ guildId, confirmation: form.creatorRemovalConfirmation }),
+            });
+            const payload = await response.json();
+            if (!response.ok)
+                throw Error(payload.error);
+            setCreatorStats(payload.stats);
+            setForm(current => ({ ...current, creatorRemovalGuildId: "", creatorRemovalConfirmation: "" }));
+            if (selectedGuild === guildId) {
+                const nextGuild = payload.stats.installations[0]?.guildId || "";
+                if (nextGuild)
+                    await refresh(nextGuild);
+                else {
+                    setData(null);
+                    setSelectedGuild("");
+                    clearSelectedGuild();
+                }
+            }
+            setNotice(`✓ FyxBot a quitté ${payload.removedGuild.guildName}`);
+        }
+        catch (error) {
+            setNotice(error instanceof Error ? error.message : "Retrait de FyxBot impossible.");
+        }
+    }
     async function removeSupportRole(userId: string) {
         const member = supportStaff.find(item => item.userId === userId);
         if (!window.confirm(`Retirer les droits Support de ${member?.displayName || userId} ?`))
@@ -1990,6 +2444,7 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
             setSupportConversation(null);
             setSupportComposing(false);
             setSelectedGuild("");
+            clearSelectedGuild();
             setForm({});
             setActive("Vue d’ensemble");
             setNotice("");
@@ -2022,6 +2477,8 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
         ? modules.filter(module => SIMPLE_NAVIGATION_ITEMS.has(module.name))
         : modules;
     const panelAlerts: PanelAlert[] = [];
+    if (supportWorkspace && supportWorkspace.counts.actionRequired > 0)
+        panelAlerts.push({ id: "support", icon: "🛟", title: supportWorkspace.access.canReplyAsStaff ? "Demandes support à traiter" : "Réponses du support", detail: `${supportWorkspace.counts.actionRequired} demande(s) nécessitent votre attention.`, target: "Assistance FyxBot", tone: "warning" });
     if (data && !data.bot.online)
         panelAlerts.push({ id: "bot-offline", icon: "🔴", title: "Bot déconnecté", detail: "FyxBot ne répond plus sur Discord.", target: "Assistance FyxBot", tone: "critical" });
     if (data && data.setupAnalysis.totals.permissionIssues > 0)
@@ -2067,7 +2524,7 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
         if (!data)
             return <div className="settings"><div><h2>Connexion au bot…</h2><p>{notice}</p></div></div>;
         if (active === "Assistance FyxBot")
-            return <SupportDashboard workspace={supportWorkspace} conversation={supportConversation} composing={supportComposing} form={form} update={update} selectRequest={id => void selectSupportRequest(id)} startRequest={startSupportRequest} createRequest={() => void createSupportTicket()} reply={() => void replyToSupport()} updateRequest={() => void manageSupportRequest()}/>;
+            return <SupportDashboard workspace={supportWorkspace} conversation={supportConversation} composing={supportComposing} form={form} update={update} selectRequest={id => void selectSupportRequest(id)} startRequest={startSupportRequest} createRequest={() => void createSupportTicket()} reply={() => void replyToSupport()} updateRequest={() => void manageSupportRequest()} closeRequest={() => void closeSupportRequest()} reopenRequest={() => void reopenSupportRequest()} deleteRequest={() => void deleteSupportHistory()} closingRequest={closingSupportRequest} reopeningRequest={reopeningSupportRequest} deletingRequest={deletingSupportRequest}/>;
         if (active === "Compte")
             return <section className="account-panel"><div className="account-avatar">{account?.username?.slice(0, 1).toUpperCase() || "?"}</div><div><p className="eyebrow">SESSION DISCORD</p><h2>{account?.username || "Compte connecté"}</h2><p>Tu accèdes uniquement aux serveurs Discord que tu peux administrer. La session expire automatiquement après sept jours.</p></div><button onClick={logout}>Se déconnecter</button></section>;
         if (active === "Modération")
@@ -2075,7 +2532,7 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
         if (active === "Créateur" && !data.creatorAccess)
             return <section className="creator-workspace"><div className="creator-empty"><p className="eyebrow">ACCÈS RESTREINT</p><h2>Espace privé FyxBot</h2><p>Cette section est réservée au propriétaire de l’application.</p></div></section>;
         if (active === "Créateur" && creatorStats)
-            return <CreatorDashboard stats={creatorStats as CreatorStats & UsageStats} supportStaff={supportStaff} form={form} update={update} grantSupportRole={() => void grantSupportRole()} removeSupportRole={userId => void removeSupportRole(userId)} grantPremiumAccess={() => void grantPremiumAccess()} revokePremiumAccess={userId => void revokePremiumAccess(userId)}/>;
+            return <CreatorDashboard stats={creatorStats as CreatorStats & UsageStats} supportStaff={supportStaff} form={form} update={update} grantSupportRole={() => void grantSupportRole()} removeSupportRole={userId => void removeSupportRole(userId)} grantPremiumAccess={() => void grantPremiumAccess()} revokePremiumAccess={userId => void revokePremiumAccess(userId)} leaveGuild={(guildId, guildName) => void leaveCreatorGuild(guildId, guildName)}/>;
         if (active === "Créateur")
             return <section className="creator-workspace">{!creatorStats ? <div className="creator-empty"><p className="eyebrow">ESPACE PRIVÉ</p><h2>Observatoire FyxBot</h2><p>Consulte les installations et l’adoption de l’offre Fondateur Premium.</p><button onClick={loadCreatorStats}>Charger les statistiques</button></div> : <><div className="creator-metrics"><article><span>SERVEURS ACTIFS</span><strong>{creatorStats.guildCount}</strong><small>FyxBot installé actuellement</small></article><article><span>MEMBRES COUVERTS</span><strong>{creatorStats.memberCount.toLocaleString("fr-FR")}</strong><small>Total des communautés</small></article><article><span>INSTALLATIONS</span><strong>{creatorStats.allTime}</strong><small>Depuis le début du suivi</small></article><article><span>DÉSINSTALLATIONS</span><strong>{creatorStats.removed}</strong><small>Depuis le début du suivi</small></article></div><div className="creator-grid"><div className="creator-servers"><p className="eyebrow">SERVEURS ACTIFS</p><h2>Utilisation de FyxBot</h2>{creatorStats.installations.map(guild => <article key={guild.guildId}><div><strong>{guild.guildName}</strong><small>Suivi depuis le {new Date(guild.firstSeenAt).toLocaleDateString("fr-FR")}</small></div><b>{guild.memberCount.toLocaleString("fr-FR")} membres</b></article>)}</div><div className="premium-plan"><p className="eyebrow">OFFRE FONDATEUR</p><h2>Free + FyxBot Premium</h2><div><strong>Free</strong><p>Outils essentiels avec un panneau de tickets, un panneau de rôles et une source sociale.</p></div><div className="premium"><strong>Premium utilisateur</strong><p>Capacités renforcées sur tous les serveurs administrés par le bénéficiaire pendant son accès.</p></div><small>30 jours offerts aux 100 premiers utilisateurs · sans carte ni renouvellement automatique.</small></div></div></>}</section>;
         if (isV2 && active === "Vue d’ensemble")
@@ -2085,7 +2542,7 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
         if (active === "Pilotage")
             return <PilotageDashboard data={data} form={form} update={update} runSetup={runSetup} deletePreview={deleteSetupPreview} saveNickname={saveBotNickname} rollback={rollbackChange} navigate={setActive}/>;
         if (active === "Premium")
-            return <PremiumDashboard premium={data.premium} guildName={data.guild.name} activate={activateFounderAccess} busy={busy}/>;
+            return <PremiumDashboard premium={data.premium} guildName={data.guild.name} assignableRoles={data.options.assignableRoles} form={form} update={update} activate={activateFounderAccess} configureRoles={configurePremiumMemberRoles} disableRoles={disablePremiumMemberRoles} busy={busy}/>;
         if (active === "Communauté")
             return <CommunityDashboard data={data} form={form} update={update} createEvent={createCommunityEvent} createGiveaway={createCommunityGiveaway} navigate={setActive}/>;
         if (active === "Messages")
@@ -2127,7 +2584,7 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
                     {visibleNavigationGroups.map(group => <div className="nav-group" key={group.label}>
                         <p className="nav-group-label">{group.label}</p>
                         {group.items.map(item => <button type="button" title={item} className={active === item ? "active" : ""} key={item} onClick={() => openPanel(item)} aria-current={active === item ? "page" : undefined}>
-                            <span className="nav-icon" aria-hidden="true">{icons[item]}</span><span className="nav-label">{item}</span>
+                            <span className="nav-icon" aria-hidden="true">{icons[item]}</span><span className="nav-label">{item}</span>{item === "Assistance FyxBot" && (supportWorkspace?.counts.actionRequired || 0) > 0 && <b className="support-nav-count" aria-label={`${supportWorkspace?.counts.actionRequired} demande(s) support à consulter`}>{supportWorkspace?.counts.actionRequired}</b>}
                         </button>)}
                     </div>)}
                 </nav>
@@ -2156,7 +2613,7 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
                     <header><div><p className="eyebrow">NAVIGATION</p><h2>Tous les modules</h2></div><button type="button" className="mobile-nav-close" onClick={() => setMobileNavOpen(false)} aria-label="Fermer le menu">×</button></header>
                     {visibleNavigationGroups.map(group => {
                         const items = group.items.filter(item => !mobilePrimarySet.has(item));
-                        return items.length > 0 && <div className="mobile-nav-group" key={group.label}><p>{group.label}</p><div>{items.map(item => <button type="button" key={item} className={active === item ? "active" : ""} onClick={() => openPanel(item)}><span aria-hidden="true">{icons[item]}</span><strong>{item}</strong></button>)}</div></div>;
+                        return items.length > 0 && <div className="mobile-nav-group" key={group.label}><p>{group.label}</p><div>{items.map(item => <button type="button" key={item} className={active === item ? "active" : ""} onClick={() => openPanel(item)}><span aria-hidden="true">{icons[item]}</span><strong>{item}</strong>{item === "Assistance FyxBot" && (supportWorkspace?.counts.actionRequired || 0) > 0 && <b className="support-nav-count" aria-label={`${supportWorkspace?.counts.actionRequired} demande(s) support à consulter`}>{supportWorkspace?.counts.actionRequired}</b>}</button>)}</div></div>;
                     })}
                     <button type="button" className={`mobile-fyxstream-card ${active === "FyxStream" ? "active" : ""}`} onClick={() => openPanel("FyxStream")}><span aria-hidden="true">🟣</span><div><strong>FyxStream</strong><small>Votre espace Twitch séparé</small></div><b aria-hidden="true">→</b></button>
                     <div className="mobile-account-card"><span className="account-mini-avatar">{account?.username?.slice(0, 1).toUpperCase() || "?"}</span><div><strong>{account?.username || "Compte Discord"}</strong><small>Compte connecté</small></div><button type="button" onClick={() => { setMobileNavOpen(false); void logout(); }}>Se déconnecter</button></div>

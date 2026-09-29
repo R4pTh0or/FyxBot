@@ -69,7 +69,9 @@ function createPostgresSupportStore(pool, { schema = 'fyxbot' } = {}) {
     if (status) where('status', status);
     parameters.push(Math.min(Math.max(Number(limit) || 50, 1), 200));
     const result = await pool.query(`SELECT ${requestFields},
-      (SELECT COUNT(*)::int FROM ${messages} WHERE request_id = ${requests}.id) AS "messageCount"
+      (SELECT COUNT(*)::int FROM ${messages} WHERE request_id = ${requests}.id) AS "messageCount",
+      (SELECT author_role FROM ${messages} WHERE request_id = ${requests}.id
+        ORDER BY created_at DESC, id DESC LIMIT 1) AS "lastAuthorRole"
       FROM ${requests} ${clauses.length ? `WHERE ${clauses.join(' AND ')}` : ''}
       ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
         updated_at DESC LIMIT $${parameters.length}`, parameters);
@@ -133,13 +135,31 @@ function createPostgresSupportStore(pool, { schema = 'fyxbot' } = {}) {
     });
   }
 
+  async function deleteSupportRequest(requestId) {
+    return transaction(async (client) => {
+      const result = await client.query(`DELETE FROM ${requests} WHERE id = $1 RETURNING id`, [requestId]);
+      return result.rows.length > 0;
+    });
+  }
+
+  async function purgeExpiredSupportRequests({ cutoff }) {
+    return transaction(async (client) => {
+      const result = await client.query(`DELETE FROM ${requests}
+        WHERE status = ANY($1::text[]) AND closed_at IS NOT NULL AND closed_at <= $2
+        RETURNING id`, [CLOSED_SUPPORT_STATUSES, cutoff]);
+      return result.rows.length;
+    });
+  }
+
   return {
     addSupportMessage,
     countOpenSupportRequests,
     createSupportRequest,
+    deleteSupportRequest,
     getSupportConversation,
     getSupportRequest,
     listSupportRequests,
+    purgeExpiredSupportRequests,
     updateSupportRequest,
   };
 }

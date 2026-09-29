@@ -2,7 +2,7 @@
 
 Bot Discord multifonction construit avec Node.js et discord.js v14. FyxBot fournit les utilitaires membres/serveur, la modération, les tickets privés avec transcripts, les logs, les suggestions, l’accueil, les rôles, AutoMod, les règlements interactifs, les anniversaires volontaires, les notifications sociales, les salons vocaux temporaires, les événements Discord programmés, les concours automatiques et un constructeur de messages Discord avec texte, embeds et images.
 
-La version publique actuelle est **FyxBot 2.0.0**. Le suivi consolidé des éléments terminés et des prochaines priorités se trouve dans [ETAT-PROJET.md](ETAT-PROJET.md). Les contrôles post-publication sont suivis dans [docs/V2-READINESS.md](docs/V2-READINESS.md).
+La version locale préparée est **FyxBot 2.0.1** ; la dernière version publique reste **2.0.0** tant que cette consolidation n’a pas reçu une confirmation de déploiement. Le suivi des éléments terminés et des prochaines priorités se trouve dans [ETAT-PROJET.md](ETAT-PROJET.md). Les contrôles post-publication sont suivis dans [docs/V2-READINESS.md](docs/V2-READINESS.md).
 
 ## Configuration adaptative du serveur
 
@@ -14,7 +14,7 @@ Les nouveautés sont détaillées dans [CHANGELOG.md](CHANGELOG.md) et sur la ro
 
 ## Démarrage guidé
 
-Quand FyxBot rejoint un serveur, il recherche un salon textuel dans lequel il possède les permissions nécessaires puis publie un message d’accueil avec un bouton vers le Control Center. La section **Démarrage** du panel présente sept étapes, leur état réel et un accès direct à chaque réglage restant.
+Quand FyxBot rejoint un serveur, il recherche un salon textuel dans lequel il possède les permissions nécessaires puis publie un message d’accueil avec un bouton vers le Control Center. **FyxJourney**, dans l’espace Pilotage, calcule un score explicable sur 100, présente sept domaines contrôlés et propose jusqu’à trois prochaines actions. **FyxVision** permet de consulter les droits effectifs du compte Discord connecté avec tous ses rôles, ou de sélectionner un rôle isolé et de vérifier les salons visibles, masqués ou gérables. Ces diagnostics restent en lecture seule : l’administrateur doit toujours ouvrir et confirmer une modification sensible.
 
 ## Notifications sociales automatiques
 
@@ -169,6 +169,13 @@ Le bénéficiaire peut ensuite appliquer cet accès aux serveurs qu'il administr
 L'attribution et la révocation sont datées et conservées dans un historique ;
 aucun moyen de paiement et aucun abonnement ne sont créés.
 
+La page Premium du panel et la commande `/premium roles-configurer` permettent
+à chaque serveur de choisir un rôle pour les abonnements Discord payants et un
+autre pour les accès offerts.
+FyxBot synchronise ces rôles après un achat, une expiration, une révocation, une
+activation Fondateur, une arrivée sur le serveur et périodiquement après son
+démarrage. Les rôles à permissions sensibles sont refusés.
+
 Avant de démarrer cette version sur une base PostgreSQL V1 existante, exécuter
 une seule fois `pnpm run database:postgres:migrate-v2`. La migration est
 idempotente et ne touche pas aux droits Fondateur ni aux droits Discord payants.
@@ -216,9 +223,11 @@ Avec `GUILD_ID`, les commandes sont publiées sur le serveur de développement e
 
 ## Prochaines étapes prévues
 
-- Valider FyxStream de bout en bout sur une chaîne Twitch de développement.
-- Créer une préproduction Railway avant la publication 2.0.0.
-- Effectuer un exercice réel de restauration R2 et une période de stabilité de sept jours.
-- Finaliser la tarification et le parcours d’achat Discord. Les accès Fondateur et partenaire restent gratuits, séparés et sans renouvellement automatique.
+- Valider localement puis publier la consolidation 2.0.1 après confirmation explicite.
+- Effectuer un exercice réel de restauration R2 vers une destination isolée.
+- Comparer les permissions du compte connecté à celles d’un rôle isolé dans FyxVision.
+- Étendre FyxTwin avec plusieurs versions virtuelles comparables avant application.
+- Préparer FyxFlow, un constructeur d’automatisations contrôlées avec aperçu et journal d’exécution.
+- Finaliser la tarification et tester le parcours d’achat Discord de bout en bout. Les accès Fondateur et partenaire restent gratuits, séparés et sans renouvellement automatique.
 
 La liste de validation complète se trouve dans [docs/V2-READINESS.md](docs/V2-READINESS.md).

@@ -2,6 +2,7 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { selectCommands, serializeCommands } = require('../src/deploy-commands');
 const { loadCommands, readCommands } = require('../src/loaders/commandLoader');
+const helpCommand = require('../src/commands/utility/help');
 
 function command(name) {
   return {
@@ -45,6 +46,26 @@ test('charge Premium dans le bot public', async () => {
   for (const commandName of ['modhelp', 'slowmode', 'lock', 'unlock']) {
     assert.equal(client.commands.has(commandName), true, `La commande /${commandName} doit être chargée.`);
   }
+});
+
+test('publie une aide générale privée avec les liens officiels', async () => {
+  const payload = helpCommand.data.toJSON();
+  let response = null;
+
+  await helpCommand.execute({
+    reply: async (value) => { response = value; },
+  });
+
+  assert.equal(payload.name, 'help');
+  assert.equal(payload.name_localizations, undefined);
+  assert.equal(helpCommand.cleanupDelayMs, 60_000);
+  assert.ok(response.flags);
+  assert.match(response.embeds[0].data.title, /Aide FyxBot/);
+  assert.match(response.embeds[0].data.fields.map((field) => field.value).join('\n'), /\/setup aperçu/);
+  assert.deepEqual(
+    response.components[0].components.map((component) => component.data.url),
+    ['https://fyxbot.com', 'https://fyxbot.com/support'],
+  );
 });
 
 test('place toutes les options obligatoires avant les options facultatives', async () => {

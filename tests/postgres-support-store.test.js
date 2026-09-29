@@ -43,6 +43,7 @@ test('isole les demandes et historise les réponses Support sous PostgreSQL', as
     }, support);
     assert.ok(messageId);
     assert.equal((await support.listSupportRequests({ requesterId: 'user-a' }))[0].messageCount, 2);
+    assert.equal((await support.listSupportRequests({ requesterId: 'user-a' }))[0].lastAuthorRole, 'staff');
     const updated = await supportApi.updateSupportRequest({
       requestId: a.id, status: 'waiting_user', priority: 'high', actorId: 'staff', actorName: 'Nova',
     }, support);
@@ -53,8 +54,24 @@ test('isole les demandes et historise les réponses Support sous PostgreSQL', as
     assert.match(conversation.events[1].detail, /waiting_user/);
     assert.equal(await support.addSupportMessage({ requestId: 'missing', authorId: 'x', authorName: 'X', authorRole: 'staff', body: 'X' }), null);
     assert.equal(await support.getSupportConversation('missing'), null);
-    await support.updateSupportRequest({ requestId: a.id, status: 'resolved', priority: 'high', actorId: 'staff', actorName: 'Nova' });
+    const closed = await support.updateSupportRequest({ requestId: a.id, status: 'closed', priority: 'high', actorId: 'user-a', actorName: 'Alice' });
+    assert.equal(closed.status, 'closed');
+    assert.ok(closed.closedAt);
+    const closedConversation = await support.getSupportConversation(a.id);
+    assert.equal(closedConversation.messages.length, 2);
+    assert.equal(closedConversation.events.length, 3);
+    assert.match(closedConversation.events[2].detail, /closed/);
     assert.equal(await support.countOpenSupportRequests('user-a'), 0);
+    await pool.query('UPDATE fyxbot.support_requests SET closed_at = $1 WHERE id = $2', ['2026-01-01T00:00:00.000Z', a.id]);
+    assert.equal(await support.purgeExpiredSupportRequests({ cutoff: '2026-04-01T00:00:00.000Z' }), 1);
+    assert.equal(await support.getSupportConversation(a.id), null);
+
+    const removable = await support.createSupportRequest({
+      guildId: 'guild-a', guildName: 'A', requesterId: 'user-a', requesterName: 'Alice',
+      category: 'technical', subject: 'À supprimer', priority: 'normal', message: 'Suppression demandée',
+    });
+    assert.equal(await support.deleteSupportRequest(removable.id), true);
+    assert.equal(await support.deleteSupportRequest(removable.id), false);
   });
 });
 

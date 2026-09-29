@@ -68,6 +68,7 @@ const {
   updateTwitchChatConfig,
 } = require('./twitchDashboardService');
 const { buildOnboardingProgress } = require('./onboardingProgress');
+const { buildMemberPermissionPerspective, buildRolePermissionPerspective } = require('./permissionPerspective');
 const { assertPremiumLimit, getGuildPremiumState } = require('./premiumPlans');
 const { claimFounderAccess } = require('./premiumFounderAccess');
 const {
@@ -77,6 +78,13 @@ const {
   listManualPremiumGrants,
   revokeManualPremiumAccess,
 } = require('./premiumManualAccess');
+const {
+  configurePremiumRoles,
+  disablePremiumRoles,
+  getPremiumRoleConfiguration,
+  syncPremiumRolesForUser,
+  syncPremiumRolesInGuild,
+} = require('./premiumRoles');
 const { setupTemporaryVoice } = require('./temporaryVoice');
 const { publicMessagePayload } = require('./customMessages');
 const {
@@ -93,6 +101,7 @@ const {
   addSupportMessage,
   countOpenSupportRequests,
   createSupportRequest,
+  deleteSupportRequest,
   getSupportConversation,
   listSupportRequests,
   updateSupportRequest,
@@ -104,14 +113,19 @@ const {
   upsertSupportStaff,
 } = require('../database/supportStaffStore');
 const {
+  CLOSED_SUPPORT_STATUSES,
   canAccessSupportRequest,
   normalizeSupportReply,
   normalizeSupportRequestInput,
   normalizeSupportStaffInput,
   normalizeSupportUpdate,
   publicSupportUrl,
+  supportRequestNeedsAction,
+  supportRequestLifecycle,
+  supportStatusAfterReply,
   supportAccessForRole,
 } = require('./supportManagement');
+const { notifySupport } = require('./supportNotifications');
 const {
   DEFAULT_BIRTHDAY_MESSAGE,
   DEFAULT_LEAVE_MESSAGE,
@@ -398,6 +412,7 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
     birthdayConfig,
     socialConfig,
     temporaryVoiceConfig,
+    premiumRoleConfig,
     automodRules,
     scheduledEvents,
   ] = await Promise.all([
@@ -412,6 +427,7 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
     getBirthdayConfig(fullGuild.id),
     getSocialConfig(fullGuild.id),
     getTemporaryVoiceConfig(fullGuild.id),
+    getPremiumRoleConfiguration(fullGuild.id),
     fullGuild.autoModerationRules.fetch().catch(() => new Map()),
     fullGuild.scheduledEvents?.fetch
       ? fullGuild.scheduledEvents.fetch().catch(() => new Map())
@@ -422,6 +438,10 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
   const voiceChannels = channels.filter((channel) => [ChannelType.GuildVoice, ChannelType.GuildStageVoice].includes(channel?.type))
     .map((channel) => ({ id: channel.id, name: channel.name }));
   const roleList = roles.filter((role) => role.id !== fullGuild.id && !role.managed).sort((a, b) => b.position - a.position).map((role) => ({ id: role.id, name: role.name, color: role.hexColor }));
+  const permissionRoleList = [
+    { id: fullGuild.id, name: '@everyone', color: roles.get(fullGuild.id)?.hexColor || '#99aab5', everyone: true },
+    ...roleList,
+  ];
   const requestingMember = requestingUserId && requestingUserId !== fullGuild.ownerId
     ? fullGuild.members.cache.get(requestingUserId) || await fullGuild.members.fetch(requestingUserId).catch(() => null)
     : null;
@@ -450,7 +470,12 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
   };
   const securityRules = [...automodRules.values()].filter((rule) => [RULE_PREFIX, LEGACY_RULE_PREFIX]
     .some((prefix) => rule.name.startsWith(prefix)) && rule.enabled).length;
-  const onboarding = buildOnboardingProgress({ setupBlueprint, config: dashboardConfig, securityRules });
+  const onboarding = buildOnboardingProgress({
+    setupBlueprint,
+    setupAnalysis,
+    config: dashboardConfig,
+    securityRules,
+  });
   await recordActivationProgress(fullGuild.id, onboarding);
   const setupSimulation = buildSetupSimulation({
     analysis: setupAnalysis,
@@ -502,7 +527,10 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
     setupAnalysis,
     setupSimulation,
     onboarding,
-    premium: await getGuildPremiumState(fullGuild.id, { userId: requestingUserId }),
+    premium: {
+      ...await getGuildPremiumState(fullGuild.id, { userId: requestingUserId }),
+      roleConfig: premiumRoleConfig,
+    },
     community: {
       events: [...scheduledEvents.values()].filter((event) => ![3, 4].includes(event.status)).map((event) => ({
         id: event.id,
@@ -515,7 +543,7 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
       })).sort((a, b) => String(a.scheduledStartAt).localeCompare(String(b.scheduledStartAt))).slice(0, 20),
       giveaways: await listGuildGiveaways(fullGuild.id),
     },
-    options: { textChannels, voiceChannels, categories, roles: roleList, assignableRoles: assignableRoleList, members: memberList },
+    options: { textChannels, voiceChannels, categories, roles: roleList, permissionRoles: permissionRoleList, assignableRoles: assignableRoleList, members: memberList },
     config: dashboardConfig,
   };
 }
@@ -590,6 +618,24 @@ async function isApplicationOwner(client, userId) {
   await client.application.fetch();
   const owner = client.application.owner;
   return owner?.id === userId || owner?.ownerId === userId;
+}
+
+async function leaveGuildInstallation(client, { guildId, confirmation } = {}) {
+  const normalizedGuildId = String(guildId || '').trim();
+  if (!/^\d{17,20}$/.test(normalizedGuildId)) throw new HttpError(400, 'Identifiant de serveur Discord invalide.');
+  const guild = client.guilds.cache.get(normalizedGuildId)
+    || await client.guilds.fetch(normalizedGuildId).catch(() => null);
+  if (!guild) throw new HttpError(404, 'FyxBot n’est plus installé sur ce serveur.');
+  if (String(confirmation || '') !== guild.name) {
+    throw new HttpError(400, 'Recopiez exactement le nom du serveur pour confirmer le retrait de FyxBot.');
+  }
+  try {
+    await guild.leave();
+  } catch (error) {
+    logger.error({ err: error, guildId: normalizedGuildId }, '[FyxBot] Retrait volontaire du serveur impossible.');
+    throw new HttpError(502, 'Discord n’a pas pu retirer FyxBot de ce serveur. Réessayez dans quelques instants.');
+  }
+  return { guildId: normalizedGuildId, guildName: guild.name };
 }
 
 async function getSupportAccess(client, userId) {
@@ -873,6 +919,36 @@ function startDashboardServer(client, options = {}) {
         state.creatorAccess = await isApplicationOwner(client, session?.user.id);
         return send(response, 200, state, origin);
       }
+      if (request.method === 'GET' && url.pathname === '/api/permissions/perspective') {
+        const guildId = String(url.searchParams.get('guildId') || '').trim();
+        if (!/^\d{17,20}$/.test(guildId)) throw new HttpError(400, 'Serveur Discord invalide.');
+        if (manageableGuildIds && !manageableGuildIds.includes(guildId)) throw new HttpError(403, 'Vous n’êtes pas autorisé à administrer ce serveur.');
+        if (!client.guilds.cache.has(guildId)) throw new HttpError(404, 'FyxBot n’est pas installé sur ce serveur.');
+        if (session) await requireGuildCapability(client, guildId, session, [PermissionFlagsBits.ManageGuild]);
+        const subject = String(url.searchParams.get('subject') || 'role').trim();
+        const roleId = String(url.searchParams.get('roleId') || '').trim();
+        const guild = await client.guilds.fetch(guildId);
+        const fullGuild = await guild.fetch();
+        const channels = await fullGuild.channels.fetch();
+        if (subject === 'me') {
+          if (!session?.user?.id) throw new HttpError(401, 'Connexion Discord requise pour afficher votre compte.');
+          const member = await fullGuild.members.fetch({ user: session.user.id, force: true }).catch(() => null);
+          if (!member) throw new HttpError(404, 'Votre compte n’est plus membre de ce serveur.');
+          if (fullGuild.ownerId !== session.user.id && !member.permissions.has(PermissionFlagsBits.ManageGuild)) {
+            throw new HttpError(403, 'Vous n’êtes plus autorisé à administrer ce serveur.');
+          }
+          return send(response, 200, {
+            perspective: buildMemberPermissionPerspective({ guild: fullGuild, member, channels }),
+          }, origin);
+        }
+        if (!/^\d{17,20}$/.test(roleId)) throw new HttpError(400, 'Rôle Discord invalide.');
+        const roles = await fullGuild.roles.fetch();
+        const role = roles.get(roleId);
+        if (!role || (role.id !== fullGuild.id && role.managed)) throw new HttpError(404, 'Rôle introuvable sur ce serveur.');
+        return send(response, 200, {
+          perspective: buildRolePermissionPerspective({ guild: fullGuild, role, channels }),
+        }, origin);
+      }
       if (request.method === 'POST' && url.pathname === '/api/bot/nickname') {
         const body = await readBody(request);
         requireRecentAuthentication(session);
@@ -921,6 +997,9 @@ function startDashboardServer(client, options = {}) {
           const activation = manualState.userActive
             ? await linkManualPremiumAccess(session.user.id, access.guild.id)
             : await claimFounderAccess(session.user.id, access.guild.id);
+          await syncPremiumRolesForUser(client, session.user.id).catch((error) => {
+            logger.error({ err: error, userId: session.user.id }, '[FyxBot] Synchronisation du rôle Premium offert impossible après activation depuis le panel.');
+          });
           const premium = await getGuildPremiumState(access.guild.id, { userId: session.user.id });
           const expiration = premium.sourceOfTruth === 'manual-access'
             ? premium.manual.grant?.endsAt
@@ -937,11 +1016,74 @@ function startDashboardServer(client, options = {}) {
           throw error;
         }
       }
+      if (request.method === 'POST' && url.pathname === '/api/premium/roles/configure') {
+        const body = await readBody(request);
+        const state = await getDashboardState(client, body.guildId, manageableGuildIds, session.user.id);
+        const access = await requireGuildCapability(client, state.guild.id, session, [PermissionFlagsBits.ManageGuild]);
+        const paidRoleId = String(body.paidRoleId || '').trim();
+        const complimentaryRoleId = String(body.complimentaryRoleId || '').trim();
+        if (!state.options.assignableRoles.some((role) => role.id === paidRoleId)
+          || !state.options.assignableRoles.some((role) => role.id === complimentaryRoleId)) {
+          throw new HttpError(400, 'Choisissez deux rôles sûrs que FyxBot peut attribuer.');
+        }
+        const [paidRole, complimentaryRole] = await Promise.all([
+          access.guild.roles.fetch(paidRoleId).catch(() => null),
+          access.guild.roles.fetch(complimentaryRoleId).catch(() => null),
+        ]);
+        try {
+          const config = await configurePremiumRoles(access.guild, {
+            paidRole,
+            complimentaryRole,
+            actorMember: access.member,
+            actorIsOwner: access.owner,
+          });
+          const sync = await syncPremiumRolesInGuild(access.guild, { config });
+          return send(response, 200, {
+            ok: true,
+            roleConfig: await getPremiumRoleConfiguration(access.guild.id),
+            sync,
+            message: `Rôles Premium configurés : ${sync.added} attribution(s) ajoutée(s), ${sync.removed} retirée(s)${sync.failed ? ` et ${sync.failed} échec(s) à vérifier` : ''}.`,
+          }, origin);
+        } catch (error) {
+          if (error?.userMessage) throw new HttpError(409, error.userMessage);
+          throw error;
+        }
+      }
+      if (request.method === 'POST' && url.pathname === '/api/premium/roles/disable') {
+        const body = await readBody(request);
+        if (body.confirmation !== 'DESACTIVER') throw new HttpError(400, 'Confirmez explicitement la désactivation des rôles Premium.');
+        const state = await getDashboardState(client, body.guildId, manageableGuildIds, session.user.id);
+        const access = await requireGuildCapability(client, state.guild.id, session, [PermissionFlagsBits.ManageGuild]);
+        const result = await disablePremiumRoles(access.guild);
+        return send(response, 200, {
+          ok: true,
+          roleConfig: await getPremiumRoleConfiguration(access.guild.id),
+          result,
+          message: `Synchronisation désactivée : ${result.removed} attribution(s) retirée(s)${result.failed ? ` et ${result.failed} échec(s) à vérifier` : ''}.`,
+        }, origin);
+      }
       if (request.method === 'GET' && url.pathname === '/api/creator/stats') {
         if (!await isApplicationOwner(client, session?.user.id)) return send(response, 403, { error: 'Espace réservé au créateur de FyxBot.' }, origin);
         return send(response, 200, {
           ...await getCreatorStats(client.guilds.cache.values()),
           manualPremiumGrants: await listManualPremiumGrants(),
+        }, origin);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/creator/guilds/leave') {
+        if (!await isApplicationOwner(client, session?.user.id)) throw new HttpError(403, 'Retrait réservé au propriétaire de FyxBot.');
+        const removedGuild = await leaveGuildInstallation(client, await readBody(request));
+        logger.warn({
+          actorId: session.user.id,
+          guildId: removedGuild.guildId,
+          guildName: removedGuild.guildName,
+        }, '[FyxBot] Le propriétaire de l’application a retiré FyxBot d’un serveur.');
+        return send(response, 200, {
+          ok: true,
+          removedGuild,
+          stats: {
+            ...await getCreatorStats(client.guilds.cache.values()),
+            manualPremiumGrants: await listManualPremiumGrants(),
+          },
         }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/premium/grants/create') {
@@ -964,6 +1106,9 @@ function startDashboardServer(client, options = {}) {
             durationDays,
             grantedBy: session.user.id,
           });
+          await syncPremiumRolesForUser(client, userId).catch((error) => {
+            logger.error({ err: error, userId }, '[FyxBot] Synchronisation du rôle Premium offert impossible après attribution manuelle.');
+          });
           return send(response, 200, { ok: true, grant, grants: await listManualPremiumGrants() }, origin);
         } catch (error) {
           if (error?.userMessage) throw new HttpError(error.code === 'MANUAL_GRANT_ACTIVE' ? 409 : 400, error.userMessage);
@@ -976,6 +1121,9 @@ function startDashboardServer(client, options = {}) {
         if (body.confirmation !== 'RETIRER') throw new HttpError(400, 'Écrivez RETIRER pour confirmer la révocation Premium.');
         try {
           await revokeManualPremiumAccess(body.userId, session.user.id);
+          await syncPremiumRolesForUser(client, body.userId).catch((error) => {
+            logger.error({ err: error, userId: body.userId }, '[FyxBot] Retrait du rôle Premium offert impossible après révocation.');
+          });
           return send(response, 200, { ok: true, grants: await listManualPremiumGrants() }, origin);
         } catch (error) {
           if (error?.userMessage) throw new HttpError(error.code === 'MANUAL_GRANT_NOT_FOUND' ? 404 : 400, error.userMessage);
@@ -1018,11 +1166,13 @@ function startDashboardServer(client, options = {}) {
           includeAll: access.canViewAll,
           limit: 200,
         });
-        const requests = access.canViewAll
+        const visibleRequests = access.canViewAll
           ? storedRequests
           : storedRequests.filter((item) => manageableGuildIds.includes(item.guildId)
             && (!requestedGuildId || item.guildId === requestedGuildId));
+        const requests = visibleRequests.map((item) => ({ ...item, ...supportRequestLifecycle(item) }));
         const openStatuses = new Set(['open', 'in_progress', 'waiting_user']);
+        const actionRequired = requests.filter((item) => supportRequestNeedsAction(item, access.canReplyAsStaff)).length;
         return send(response, 200, {
           ownerAccess: access.role === 'owner',
           access,
@@ -1032,6 +1182,7 @@ function startDashboardServer(client, options = {}) {
             total: requests.length,
             open: requests.filter((item) => openStatuses.has(item.status)).length,
             urgent: requests.filter((item) => openStatuses.has(item.status) && item.priority === 'urgent').length,
+            actionRequired,
           },
         }, origin);
       }
@@ -1044,7 +1195,14 @@ function startDashboardServer(client, options = {}) {
           supportAccess: access,
           manageableGuildIds,
         })) throw new HttpError(403, 'Vous ne pouvez pas consulter cette demande.');
-        return send(response, 200, { ownerAccess: access.role === 'owner', access, conversation }, origin);
+        return send(response, 200, {
+          ownerAccess: access.role === 'owner',
+          access,
+          conversation: {
+            ...conversation,
+            request: { ...conversation.request, ...supportRequestLifecycle(conversation.request) },
+          },
+        }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/support/create') {
         const body = await readBody(request);
@@ -1061,6 +1219,7 @@ function startDashboardServer(client, options = {}) {
           requesterName: session.user.username,
           ...input,
         });
+        void notifySupport(client, { kind: 'created', request: created, actorId: session.user.id });
         return send(response, 201, { ok: true, request: created }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/support/reply') {
@@ -1074,11 +1233,15 @@ function startDashboardServer(client, options = {}) {
           manageableGuildIds,
         })) throw new HttpError(403, 'Vous ne pouvez pas répondre à cette demande.');
         if (conversation.messages.length >= 100) throw new HttpError(409, 'Cette conversation a atteint sa limite. Créez une nouvelle demande si nécessaire.');
+        if (CLOSED_SUPPORT_STATUSES.includes(conversation.request.status)) {
+          throw new HttpError(409, 'Cette demande est archivée. Rouvrez-la avant d’envoyer une nouvelle réponse.');
+        }
         const reply = normalizeSupportReply(body.message);
-        if (!access.canReplyAsStaff && ['resolved', 'closed'].includes(conversation.request.status)) {
+        const nextStatus = supportStatusAfterReply(conversation.request.status, access.canReplyAsStaff);
+        if (nextStatus) {
           await updateSupportRequest({
             requestId: conversation.request.id,
-            status: 'open',
+            status: nextStatus,
             priority: conversation.request.priority,
             actorId: session.user.id,
             actorName: session.user.username,
@@ -1091,6 +1254,11 @@ function startDashboardServer(client, options = {}) {
           authorRole: access.canReplyAsStaff ? 'staff' : 'user',
           body: reply,
         });
+        void notifySupport(client, {
+          kind: access.canReplyAsStaff ? 'staff_reply' : 'user_reply',
+          request: conversation.request,
+          actorId: session.user.id,
+        });
         return send(response, 200, { ok: true, conversation: await getSupportConversation(conversation.request.id) }, origin);
       }
       if (request.method === 'POST' && url.pathname === '/api/support/update') {
@@ -1100,6 +1268,11 @@ function startDashboardServer(client, options = {}) {
         const current = await getSupportConversation(String(body.requestId || ''));
         if (!current) throw new HttpError(404, 'Demande de support introuvable.');
         const update = normalizeSupportUpdate(body);
+        if (CLOSED_SUPPORT_STATUSES.includes(current.request.status)
+          && !CLOSED_SUPPORT_STATUSES.includes(update.status)
+          && !supportRequestLifecycle(current.request).canReopen) {
+          throw new HttpError(409, 'Le délai de réouverture de 14 jours est dépassé. Créez une nouvelle demande.');
+        }
         if (!access.canManagePriority && update.priority !== current.request.priority) {
           throw new HttpError(403, 'Seuls les administrateurs Support peuvent modifier la priorité.');
         }
@@ -1109,7 +1282,87 @@ function startDashboardServer(client, options = {}) {
           actorName: session.user.username,
           ...update,
         });
+        if (updated.status === 'resolved' && current.request.status !== 'resolved') {
+          void notifySupport(client, { kind: 'status_resolved', request: updated, actorId: session.user.id });
+        }
         return send(response, 200, { ok: true, request: updated }, origin);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/support/close') {
+        const body = await readBody(request);
+        const current = await getSupportConversation(String(body.requestId || ''));
+        if (!current) throw new HttpError(404, 'Demande de support introuvable.');
+        const access = await getSupportAccess(client, session?.user.id);
+        if (!canAccessSupportRequest(current.request, {
+          userId: session.user.id,
+          supportAccess: access,
+          manageableGuildIds,
+        })) throw new HttpError(403, 'Vous ne pouvez pas fermer cette demande.');
+        if (current.request.status === 'closed') {
+          return send(response, 200, { ok: true, request: current.request }, origin);
+        }
+        const updated = await updateSupportRequest({
+          requestId: current.request.id,
+          status: 'closed',
+          priority: current.request.priority,
+          actorId: session.user.id,
+          actorName: session.user.username,
+        });
+        void notifySupport(client, {
+          kind: access.canReplyAsStaff ? 'status_closed' : 'user_closed',
+          request: updated,
+          actorId: session.user.id,
+        });
+        return send(response, 200, { ok: true, request: updated }, origin);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/support/reopen') {
+        const body = await readBody(request);
+        const current = await getSupportConversation(String(body.requestId || ''));
+        if (!current) throw new HttpError(404, 'Demande de support introuvable.');
+        const access = await getSupportAccess(client, session?.user.id);
+        if (!canAccessSupportRequest(current.request, {
+          userId: session.user.id,
+          supportAccess: access,
+          manageableGuildIds,
+        })) throw new HttpError(403, 'Vous ne pouvez pas rouvrir cette demande.');
+        if (!CLOSED_SUPPORT_STATUSES.includes(current.request.status)) {
+          return send(response, 200, { ok: true, request: current.request }, origin);
+        }
+        if (!supportRequestLifecycle(current.request).canReopen) {
+          throw new HttpError(409, 'Le délai de réouverture de 14 jours est dépassé. Créez une nouvelle demande.');
+        }
+        const updated = await updateSupportRequest({
+          requestId: current.request.id,
+          status: 'open',
+          priority: current.request.priority,
+          actorId: session.user.id,
+          actorName: session.user.username,
+        });
+        void notifySupport(client, {
+          kind: access.canReplyAsStaff ? 'status_reopened' : 'user_reopened',
+          request: updated,
+          actorId: session.user.id,
+        });
+        return send(response, 200, { ok: true, request: updated }, origin);
+      }
+      if (request.method === 'POST' && url.pathname === '/api/support/delete') {
+        const body = await readBody(request);
+        if (body.confirmation !== 'SUPPRIMER') throw new HttpError(400, 'Écrivez SUPPRIMER pour confirmer la suppression définitive.');
+        const current = await getSupportConversation(String(body.requestId || ''));
+        if (!current) throw new HttpError(404, 'Demande de support introuvable.');
+        const access = await getSupportAccess(client, session?.user.id);
+        if (!canAccessSupportRequest(current.request, {
+          userId: session.user.id,
+          supportAccess: access,
+          manageableGuildIds,
+        })) throw new HttpError(403, 'Vous ne pouvez pas supprimer cette demande.');
+        if (current.request.requesterId !== session.user.id && !access.canDeleteRequests) {
+          throw new HttpError(403, 'Seuls l’auteur, un administrateur Support ou le propriétaire peuvent supprimer cette demande.');
+        }
+        if (!CLOSED_SUPPORT_STATUSES.includes(current.request.status)) {
+          throw new HttpError(409, 'Fermez la demande avant de la supprimer définitivement.');
+        }
+        await deleteSupportRequest(current.request.id);
+        return send(response, 200, { ok: true, deleted: true }, origin);
       }
       if (request.method === 'GET' && url.pathname === '/api/moderation/warnings') {
         const state = await getDashboardState(client, url.searchParams.get('guildId'), manageableGuildIds);
@@ -1989,4 +2242,4 @@ function startDashboardServer(client, options = {}) {
   return server;
 }
 
-module.exports = { HttpError, asTwitchHttpError, buildAllowedOrigins, contentDeleteError, deleteTrackedDiscordMessage, getDashboardState, isLoopbackHost, isRequestOriginAllowed, messagePublishError, normalizeBotNickname, panelErrorResponse, rateLimit, requireGuildCapability, requireRecentAuthentication, requireTwitchGuildAccess, revalidateManageableGuildIds, sessionRateLimit, startDashboardServer, updateGuildBotNickname };
+module.exports = { HttpError, asTwitchHttpError, buildAllowedOrigins, contentDeleteError, deleteTrackedDiscordMessage, getDashboardState, isLoopbackHost, isRequestOriginAllowed, leaveGuildInstallation, messagePublishError, normalizeBotNickname, panelErrorResponse, rateLimit, requireGuildCapability, requireRecentAuthentication, requireTwitchGuildAccess, revalidateManageableGuildIds, sessionRateLimit, startDashboardServer, updateGuildBotNickname };

@@ -2,6 +2,7 @@ const { Events } = require('discord.js');
 const { syncCreatorStats } = require('../database/creatorStatsStore');
 const { broadcastPendingChangelogs } = require('../services/changelogNotifications');
 const { syncPremiumEntitlements } = require('../services/premiumEntitlements');
+const { startPremiumRoleScheduler, syncAllConfiguredPremiumRoles } = require('../services/premiumRoles');
 const { startGiveawayScheduler } = require('../services/communityGiveaways');
 const { runPermissionMigration } = require('../services/permissionMigration');
 const { migrateLegacyLocalBackups } = require('../services/serverBackup');
@@ -32,6 +33,13 @@ module.exports = {
       if (premium.configured) logger.info({ synced: premium.synced }, '[FyxBot] Droits Premium Discord synchronisés.');
     } catch (error) {
       logger.error({ err: error }, '[FyxBot] Synchronisation Premium Discord indisponible.');
+    }
+    try {
+      const premiumRoles = await syncAllConfiguredPremiumRoles(client);
+      if (premiumRoles.length > 0) logger.info({ premiumRoles }, '[FyxBot] Rôles Premium Discord synchronisés.');
+      startPremiumRoleScheduler(client);
+    } catch (error) {
+      logger.error({ err: error }, '[FyxBot] Synchronisation des rôles Premium indisponible.');
     }
     await startGiveawayScheduler(client);
   },

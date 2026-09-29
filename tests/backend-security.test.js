@@ -9,6 +9,7 @@ const {
   getDashboardState,
   isLoopbackHost,
   isRequestOriginAllowed,
+  leaveGuildInstallation,
   messagePublishError,
   normalizeBotNickname,
   panelErrorResponse,
@@ -365,6 +366,22 @@ test('exige une connexion Discord récente avant une action sensible', () => {
   assert.doesNotThrow(() => requireRecentAuthentication({ authenticatedAt: Date.now() }));
   assert.throws(() => requireRecentAuthentication({ authenticatedAt: Date.now() - 11 * 60_000 }), /Reconnectez-vous/);
   assert.throws(() => requireRecentAuthentication({}), /Reconnectez-vous/);
+});
+
+test('retire FyxBot seulement après confirmation exacte du nom du serveur', async () => {
+  let leaveCalls = 0;
+  const guild = { id: '123456789012345678', name: 'Communauté Démo', leave: async () => { leaveCalls += 1; } };
+  const client = { guilds: { cache: new Map([[guild.id, guild]]), fetch: async () => guild } };
+  await assert.rejects(
+    leaveGuildInstallation(client, { guildId: guild.id, confirmation: 'Communaute Demo' }),
+    /exactement le nom du serveur/,
+  );
+  assert.equal(leaveCalls, 0);
+  assert.deepEqual(
+    await leaveGuildInstallation(client, { guildId: guild.id, confirmation: guild.name }),
+    { guildId: guild.id, guildName: guild.name },
+  );
+  assert.equal(leaveCalls, 1);
 });
 
 test('attribue un emoji cohérent sans modifier les catégories déjà illustrées', () => {

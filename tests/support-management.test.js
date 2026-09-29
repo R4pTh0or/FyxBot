@@ -5,8 +5,10 @@ const {
   addSupportMessage,
   countOpenSupportRequests,
   createSupportRequest,
+  deleteSupportRequest,
   getSupportConversation,
   listSupportRequests,
+  purgeExpiredSupportRequests,
   updateSupportRequest,
 } = require('../src/database/supportStore');
 const {
@@ -21,6 +23,11 @@ const {
   normalizeSupportRequestInput,
   normalizeSupportStaffInput,
   normalizeSupportUpdate,
+  SUPPORT_REOPEN_WINDOW_MS,
+  SUPPORT_RETENTION_MS,
+  supportRequestNeedsAction,
+  supportRequestLifecycle,
+  supportStatusAfterReply,
   supportAccessForRole,
 } = require('../src/services/supportManagement');
 
@@ -82,13 +89,41 @@ test('applique des droits Support distincts au propriétaire, aux administrateur
   assert.equal(owner.canManageTeam, true);
   assert.equal(administrator.canViewAll, true);
   assert.equal(administrator.canManagePriority, true);
+  assert.equal(administrator.canDeleteRequests, true);
   assert.equal(administrator.canManageTeam, false);
   assert.equal(moderator.canManageStatus, true);
   assert.equal(moderator.canManagePriority, false);
+  assert.equal(moderator.canDeleteRequests, false);
   assert.equal(user.canViewAll, false);
   assert.equal(canAccessSupportRequest({ requesterId: 'user-a', guildId: 'guild-a' }, {
     userId: 'moderator', supportAccess: moderator,
   }), true);
+});
+
+test('signale au bon côté les demandes nécessitant une réponse', () => {
+  assert.equal(supportRequestNeedsAction({ status: 'open', lastAuthorRole: 'user' }, true), true);
+  assert.equal(supportRequestNeedsAction({ status: 'in_progress', lastAuthorRole: 'staff' }, true), false);
+  assert.equal(supportRequestNeedsAction({ status: 'waiting_user', lastAuthorRole: 'staff' }), true);
+  assert.equal(supportRequestNeedsAction({ status: 'resolved', lastAuthorRole: 'user' }, true), false);
+});
+
+test('ne rouvre pas implicitement une demande archivée avec une réponse', () => {
+  assert.equal(supportStatusAfterReply('waiting_user', false), 'open');
+  assert.equal(supportStatusAfterReply('resolved', false), null);
+  assert.equal(supportStatusAfterReply('closed', true), null);
+  assert.equal(supportStatusAfterReply('in_progress', true), null);
+});
+
+test('borne la réouverture à 14 jours et la conservation à 90 jours', () => {
+  const closedAt = '2026-09-01T12:00:00.000Z';
+  const active = supportRequestLifecycle({ status: 'closed', closedAt }, new Date('2026-09-10T12:00:00.000Z'));
+  assert.equal(active.canReopen, true);
+  assert.equal(active.reopenUntil, new Date(Date.parse(closedAt) + SUPPORT_REOPEN_WINDOW_MS).toISOString());
+  assert.equal(active.expiresAt, new Date(Date.parse(closedAt) + SUPPORT_RETENTION_MS).toISOString());
+  assert.equal(supportRequestLifecycle({ status: 'closed', closedAt }, new Date('2026-09-16T12:00:00.000Z')).canReopen, false);
+  assert.deepEqual(supportRequestLifecycle({ status: 'open', closedAt: null }), {
+    canReopen: false, reopenUntil: null, expiresAt: null,
+  });
 });
 
 test('valide, attribue, modifie et retire un rôle Support', async () => {
@@ -115,12 +150,14 @@ test('crée une conversation, ajoute des réponses et historise les décisions',
   assert.equal(created.status, 'open');
   assert.equal(await countOpenSupportRequests('user-a', target), 1);
   assert.equal((await listSupportRequests({ requesterId: 'user-a' }, target)).length, 1);
+  assert.equal((await listSupportRequests({ requesterId: 'user-a' }, target))[0].lastAuthorRole, 'user');
   assert.equal((await listSupportRequests({ requesterId: 'user-b' }, target)).length, 0);
 
   await addSupportMessage({
     requestId: created.id, authorId: 'owner', authorName: 'Antony', authorRole: 'staff',
     body: 'Je vérifie la commande et je reviens vers vous.',
   }, target);
+  assert.equal((await listSupportRequests({ requesterId: 'user-a' }, target))[0].lastAuthorRole, 'staff');
   await updateSupportRequest({
     requestId: created.id, status: 'waiting_user', priority: 'high', actorId: 'owner', actorName: 'Antony',
   }, target);
@@ -131,4 +168,28 @@ test('crée une conversation, ajoute des réponses et historise les décisions',
   assert.match(conversation.events[1].detail, /waiting_user/);
   assert.equal(conversation.request.status, 'waiting_user');
   assert.equal(conversation.request.priority, 'high');
+
+  const closed = await updateSupportRequest({
+    requestId: created.id, status: 'closed', priority: 'high', actorId: 'user-a', actorName: 'Alice',
+  }, target);
+  assert.equal(closed.status, 'closed');
+  assert.ok(closed.closedAt);
+  assert.equal(await countOpenSupportRequests('user-a', target), 0);
+  const closedConversation = await getSupportConversation(created.id, target);
+  assert.equal(closedConversation.messages.length, 2);
+  assert.equal(closedConversation.events.length, 3);
+  assert.match(closedConversation.events[2].detail, /closed/);
+
+  target.prepare('UPDATE support_requests SET closed_at = ? WHERE id = ?')
+    .run('2026-01-01T00:00:00.000Z', created.id);
+  assert.equal(await purgeExpiredSupportRequests({ cutoff: '2026-04-01T00:00:00.000Z' }, target), 1);
+  assert.equal(await getSupportConversation(created.id, target), null);
+
+  const removable = await createSupportRequest({
+    guildId: 'guild-a', guildName: 'Serveur A', requesterId: 'user-a', requesterName: 'Alice',
+    category: 'technical', subject: 'Demande à retirer', priority: 'normal',
+    message: 'Je souhaite pouvoir supprimer cette demande après sa fermeture.',
+  }, target);
+  assert.equal(await deleteSupportRequest(removable.id, target), true);
+  assert.equal(await deleteSupportRequest(removable.id, target), false);
 });

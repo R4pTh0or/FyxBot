@@ -11,6 +11,8 @@ const SUPPORT_PRIORITIES = Object.freeze(['low', 'normal', 'high', 'urgent']);
 const SUPPORT_STATUSES = Object.freeze(['open', 'in_progress', 'waiting_user', 'resolved', 'closed']);
 const CLOSED_SUPPORT_STATUSES = Object.freeze(['resolved', 'closed']);
 const SUPPORT_STAFF_ROLES = Object.freeze(['moderator', 'administrator']);
+const SUPPORT_REOPEN_WINDOW_MS = 14 * 24 * 60 * 60 * 1000;
+const SUPPORT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 
 function boundedText(value, { label, minimum, maximum }) {
   const text = String(value || '').trim();
@@ -62,6 +64,7 @@ function supportAccessForRole(role) {
     canReplyAsStaff: normalizedRole !== 'user',
     canManageStatus: normalizedRole !== 'user',
     canManagePriority: normalizedRole === 'owner' || normalizedRole === 'administrator',
+    canDeleteRequests: normalizedRole === 'owner' || normalizedRole === 'administrator',
     canManageTeam: normalizedRole === 'owner',
   };
 }
@@ -70,6 +73,30 @@ function canAccessSupportRequest(request, { userId, ownerAccess, staffAccess, su
   if (!request || !userId) return false;
   if (ownerAccess || staffAccess || supportAccess?.canViewAll) return true;
   return request.requesterId === userId && manageableGuildIds.includes(request.guildId);
+}
+
+function supportRequestNeedsAction(request, staffView = false) {
+  return Boolean(request && !CLOSED_SUPPORT_STATUSES.includes(request.status)
+    && request.lastAuthorRole === (staffView ? 'user' : 'staff'));
+}
+
+function supportStatusAfterReply(status, staffReply = false) {
+  if (CLOSED_SUPPORT_STATUSES.includes(status)) return null;
+  if (staffReply) return null;
+  return status === 'waiting_user' ? 'open' : null;
+}
+
+function supportRequestLifecycle(request, now = new Date()) {
+  const closedAt = request?.closedAt ? new Date(request.closedAt) : null;
+  const closed = Boolean(request && CLOSED_SUPPORT_STATUSES.includes(request.status) && closedAt && !Number.isNaN(closedAt.getTime()));
+  if (!closed) return { canReopen: false, reopenUntil: null, expiresAt: null };
+  const reopenUntil = new Date(closedAt.getTime() + SUPPORT_REOPEN_WINDOW_MS);
+  const expiresAt = new Date(closedAt.getTime() + SUPPORT_RETENTION_MS);
+  return {
+    canReopen: now.getTime() <= reopenUntil.getTime(),
+    reopenUntil: reopenUntil.toISOString(),
+    expiresAt: expiresAt.toISOString(),
+  };
 }
 
 function publicSupportUrl() {
@@ -85,6 +112,8 @@ function publicSupportUrl() {
 
 module.exports = {
   CLOSED_SUPPORT_STATUSES,
+  SUPPORT_REOPEN_WINDOW_MS,
+  SUPPORT_RETENTION_MS,
   SUPPORT_CATEGORIES,
   SUPPORT_PRIORITIES,
   SUPPORT_STAFF_ROLES,
@@ -95,5 +124,8 @@ module.exports = {
   normalizeSupportStaffInput,
   normalizeSupportUpdate,
   publicSupportUrl,
+  supportRequestNeedsAction,
+  supportRequestLifecycle,
+  supportStatusAfterReply,
   supportAccessForRole,
 };

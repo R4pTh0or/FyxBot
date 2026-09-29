@@ -123,6 +123,23 @@ test('affiche la projection et les suppressions propres au mode choisi', () => {
   assert.match(dashboardSource, /PERMISSIONS FINALES/);
 });
 
+test('expose FyxVision en lecture seule pour les permissions réelles d’un rôle', () => {
+  const dashboardSource = fs.readFileSync(path.join(__dirname, '..', 'dashboard', 'app', 'Dashboard.tsx'), 'utf8');
+  const dashboardServerSource = fs.readFileSync(path.join(__dirname, '..', 'src', 'services', 'dashboardServer.js'), 'utf8');
+  assert.match(dashboardSource, /FYXVISION · PERSPECTIVE RÉELLE/);
+  assert.match(dashboardSource, /\/permissions\/perspective/);
+  assert.match(dashboardSource, /Cette lecture ne modifie rien sur Discord/);
+  assert.match(dashboardServerSource, /url\.pathname === '\/api\/permissions\/perspective'/);
+  assert.match(dashboardServerSource, /manageableGuildIds && !manageableGuildIds\.includes\(guildId\)/);
+  assert.match(dashboardServerSource, /requireGuildCapability\(client, guildId, session, \[PermissionFlagsBits\.ManageGuild\]\)/);
+  assert.match(dashboardServerSource, /buildRolePermissionPerspective/);
+  assert.match(dashboardServerSource, /subject === 'me'/);
+  assert.match(dashboardServerSource, /session\.user\.id/);
+  assert.match(dashboardServerSource, /buildMemberPermissionPerspective/);
+  assert.match(dashboardSource, /Mon compte/);
+  assert.match(dashboardSource, /Tous mes rôles combinés|tous ses rôles combinés/);
+});
+
 test('réunit les contenus éditables sans inclure le changelog officiel', () => {
   const library = buildContentLibrary({
     channelNames: new Map([['rules', 'règlement'], ['tickets', 'tickets']]),

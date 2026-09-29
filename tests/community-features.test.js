@@ -114,7 +114,58 @@ test('calcule le parcours guidé depuis la configuration réelle', () => {
   assert.equal(progress.percent, 57);
   assert.equal(progress.steps.find((step) => step.key === 'security').complete, true);
   assert.equal(progress.recommendedStep.key, 'rules');
+  assert.equal(progress.healthLevel, 'progressing');
+  assert.equal(progress.healthScore, 65);
+  assert.deepEqual(progress.summary, { ready: 4, attention: 0, missing: 3 });
+  assert.equal(progress.recommendations.length, 3);
+});
+
+test('FyxJourney explique les écarts de structure et les priorise avant les modules secondaires', () => {
+  const progress = buildOnboardingProgress({
+    setupBlueprint: { description: 'Serveur Minecraft' },
+    setupAnalysis: {
+      totals: { missing: 3, permissionIssues: 2 },
+      uneditableRoles: ['Fondateur'],
+    },
+    securityRules: 2,
+    config: {
+      logs: { channelId: 'logs' },
+      tickets: { categoryId: 'tickets' },
+    },
+  });
+
+  assert.equal(progress.healthScore, 37);
   assert.equal(progress.healthLevel, 'starting');
+  assert.equal(progress.recommendedStep.key, 'structure');
+  assert.equal(progress.recommendedStep.status, 'attention');
+  assert.match(progress.recommendedStep.issues[0], /3 éléments de structure/);
+  assert.equal(progress.steps.find((step) => step.key === 'security').score, 10);
+  assert.equal(progress.steps.find((step) => step.key === 'tickets').status, 'attention');
+  assert.deepEqual(progress.summary, { ready: 1, attention: 3, missing: 3 });
+});
+
+test('FyxJourney atteint 100 uniquement lorsque les fondations sont réellement prêtes', () => {
+  const progress = buildOnboardingProgress({
+    setupBlueprint: { description: 'Serveur complet' },
+    setupAnalysis: {
+      totals: { missing: 0, permissionIssues: 0 },
+      uneditableRoles: [],
+    },
+    securityRules: 4,
+    config: {
+      logs: { channelId: 'logs' },
+      welcome: { welcomeChannelId: 'welcome' },
+      rules: { messageId: 'rules-message' },
+      tickets: { categoryId: 'tickets', staffRoleId: 'staff' },
+      temporaryVoice: { hubChannelId: 'voice-hub' },
+    },
+  });
+
+  assert.equal(progress.complete, true);
+  assert.equal(progress.healthScore, 100);
+  assert.equal(progress.percent, 100);
+  assert.equal(progress.recommendedStep, null);
+  assert.deepEqual(progress.recommendations, []);
 });
 
 test('prépare un message d’arrivée avec un lien public sécurisé vers le panel', () => {

@@ -6,6 +6,16 @@ Les réponses temporaires aux commandes et aux boutons disparaissent automatique
 
 ## Utilitaire
 
+### `/help`
+
+Affiche en privé les principales familles de commandes ainsi que les liens vers le panel et le support FyxBot. La réponse reste visible pendant environ une minute afin de laisser le temps de la consulter.
+
+**Exemple :**
+
+```text
+/help
+```
+
 ### `/ping`
 
 Affiche la latence du bot et de sa connexion à Discord.
@@ -290,9 +300,27 @@ Programme un événement dans l’interface native de Discord. Indiquez le titre
 
 Publie un concours dans le salon choisi avec un bouton de participation, entre 1 et 5 gagnants et un tirage automatique. Une seule participation est acceptée par membre. Les identifiants des participants sont supprimés de la base après le résultat.
 
-## Premium — reporté
+## Premium
 
-FyxBot Premium est conservé pour une version ultérieure. Aucune commande `/premium`, aucun paiement et aucune limitation Premium ne sont publiés dans la version 1.3.0.
+### `/premium statut`
+
+Affiche le forfait actif, l’état de l’accès Fondateur et les rôles Premium automatiques configurés.
+
+### `/premium offres`
+
+Compare les fonctionnalités Free et Premium.
+
+### `/premium activer`
+
+Active ou applique l’accès Fondateur gratuit à un serveur administré par l’utilisateur.
+
+### `/premium roles-configurer`
+
+Associe un rôle aux abonnés Discord payants et un second rôle aux essais ou accès offerts. FyxBot refuse les rôles sensibles, gérés par une intégration ou placés au-dessus de sa propre position.
+
+### `/premium roles-desactiver`
+
+Désactive la synchronisation et retire uniquement les rôles Premium configurés par FyxBot.
 
 ## Messages personnalisés et changelog
 

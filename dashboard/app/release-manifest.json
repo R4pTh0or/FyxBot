@@ -1,12 +1,29 @@
 {
   "schemaVersion": 1,
   "product": "FyxBot",
-  "currentVersion": "2.0.0",
+  "currentVersion": "2.0.1",
   "status": "available",
   "statusLabel": "Disponible",
-  "releasedAt": "2026-09-20T00:00:00+02:00",
+  "releasedAt": "2026-09-21T00:00:00+02:00",
   "changelogPath": "/changelog",
   "releases": [
+    {
+      "version": "2.0.1",
+      "dateLabel": "21 septembre 2026",
+      "releasedAt": "2026-09-21T00:00:00+02:00",
+      "status": "available",
+      "statusLabel": "Disponible",
+      "title": "FyxJourney explique et priorise les améliorations",
+      "intro": "Cette consolidation rend le parcours FyxBot plus lisible, synchronise les rôles Premium Discord et remet la documentation de la V2 au niveau de la production.",
+      "changes": [
+        ["🧭", "Diagnostic FyxJourney", "Un score pondéré sur 100 explique l’état de la structure, de la sécurité, du règlement, de l’accueil, du support et de l’animation."],
+        ["🎯", "Plan priorisé", "FyxJourney propose jusqu’à trois prochaines actions concrètes sans appliquer automatiquement de modification au serveur."],
+        ["🔎", "Écarts explicables", "Les éléments manquants, permissions incorrectes et problèmes de hiérarchie sont présentés avec leur impact et un accès direct au bon réglage."],
+        ["💎", "Rôles Premium automatiques", "Les accès payants et offerts peuvent recevoir des rôles Discord distincts, synchronisés lors des changements de droit et à l’arrivée d’un membre."],
+        ["📚", "Documentation consolidée", "L’état du projet, la préparation V2 et le changelog correspondent de nouveau à la version réellement préparée."],
+        ["🛡️", "Application contrôlée", "Le diagnostic reste en lecture seule : chaque correction sensible doit toujours être ouverte, vérifiée et confirmée par un administrateur."]
+      ]
+    },
     {
       "version": "2.0.0",
       "dateLabel": "20 septembre 2026",

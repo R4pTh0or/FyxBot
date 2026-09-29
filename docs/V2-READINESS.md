@@ -1,14 +1,15 @@
-# FyxBot V2 — critères de préparation
+# FyxBot V2 — suivi post-publication
 
-Ce document définit ce que signifie « V2 terminée ». Il sert de liste de contrôle
-avant la publication et évite qu'un simple changement de numéro de version soit
-présenté comme une nouvelle version majeure.
+La V2 est publique. Ce document conserve les contrôles restants, les preuves de
+qualité et les tâches qui doivent encore être terminées avant la
+commercialisation complète de Premium.
 
 ## Règle de validation
 
 Une section est considérée comme terminée uniquement si son comportement est
-implémenté, testé localement, vérifié en préproduction et documenté. Toute action
-publique ou payante reste soumise à une validation explicite du propriétaire.
+implémenté, testé et documenté. Une validation de production doit être ajoutée
+lorsqu’elle est nécessaire. Toute action publique ou payante reste soumise à
+une confirmation explicite du propriétaire.
 
 ## 1. Socle stable
 
@@ -17,11 +18,12 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [x] Stockage PostgreSQL disponible avec repli SQLite contrôlé.
 - [x] Sauvegardes chiffrées et tests automatisés de restauration.
 - [x] Journalisation structurée et contrôles d'accès du panel.
-- [x] Suite locale validée : 284 tests bot et 5 tests panel, lint, types et build.
+- [x] Suite locale validée : 304 tests bot et 5 tests panel, lint, types et build.
 - [ ] Mettre à jour automatiquement l'état du projet et la liste des commandes.
 - [x] Relier le dossier source `C:\Fyxbot` au dépôt GitHub FyxBot ; le dépôt Git vide imbriqué dans `dashboard` a été sauvegardé localement avant son retrait.
 - [ ] Effectuer un exercice réel de restauration R2 sans modifier la production.
-- [ ] Observer sept jours sans incident critique avant la publication 2.0.0.
+- [ ] Consolider un historique de sept jours sans incident critique autour de la
+  version publique.
 
 ## 2. FyxPilot Studio
 
@@ -33,6 +35,8 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [x] Afficher l'historique des changements avec leur auteur et leur résultat.
 - [x] Proposer un retour arrière depuis le panel avec confirmation renforcée.
 - [x] Afficher les permissions finales par rôle et par catégorie avant application, y compris les exceptions de salon.
+- [x] Simuler la perspective réelle d'un rôle sur les salons existants, avec alertes de sécurité explicables et sans mutation Discord.
+- [x] Étendre FyxVision au compte Discord connecté pour reproduire ses permissions combinées et ses exceptions de salon.
 
 ## 3. FyxStream
 
@@ -64,19 +68,21 @@ publique ou payante reste soumise à une validation explicite du propriétaire.
 - [ ] Vérifier les limites de débit, CSRF, OAuth, permissions et suppression des données.
 - [ ] Réaliser un test de charge borné après accord sur le budget Railway.
 
-## 6. Publication 2.0.0
+## 6. Publication et suivi 2.0.x
 
 - [x] Mettre à jour `README.md`, `COMMANDES.md`, `CHANGELOG.md` et les pages légales.
 - [x] Préparer le manifeste 2.0.0 et l'annonce Discord.
+- [x] Déployer la V2 en production et vérifier le bot, le panel et l’API jusqu’à
+  l’état Railway `SUCCESS`.
 - [ ] Faire un contrôle final de la vérification et de la monétisation Discord.
 - [ ] Préparer le tutoriel d'installation, le support et la campagne Pulse.
 - [ ] Déployer d'abord en préproduction, puis promouvoir le même code en production.
-- [ ] Vérifier Railway jusqu'à l'état `SUCCESS`, puis contrôler le panel, l'API, Discord et Twitch.
+- [ ] Publier la consolidation 2.0.1 après validation locale et confirmation.
 
 ## Définition de terminé
 
-La V2 peut être annoncée lorsqu'un nouvel administrateur peut inviter FyxBot,
-décrire son serveur, prévisualiser les changements, les appliquer, les comprendre
-et revenir en arrière sans assistance technique. Les parcours Discord, Twitch,
-Premium, sauvegarde et suppression des données doivent fonctionner de bout en
-bout, avec une documentation identique à la version réellement déployée.
+Le socle V2 est considéré comme public lorsqu’un nouvel administrateur peut
+inviter FyxBot, décrire son serveur, prévisualiser les changements, les appliquer,
+les comprendre et revenir en arrière. La préproduction, l’exercice réel R2 et le
+cycle payant Discord restent des contrôles séparés avant la commercialisation
+complète de Premium.

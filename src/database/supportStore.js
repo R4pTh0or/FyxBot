@@ -59,7 +59,9 @@ function listSupportRequestsSqlite({ requesterId = null, guildId = null, include
   parameters.push(Math.min(Math.max(Number(limit) || 50, 1), 200));
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
   return target.prepare(`SELECT ${requestFields},
-    (SELECT COUNT(*) FROM support_messages WHERE request_id = support_requests.id) AS messageCount
+    (SELECT COUNT(*) FROM support_messages WHERE request_id = support_requests.id) AS messageCount,
+    (SELECT author_role FROM support_messages WHERE request_id = support_requests.id
+      ORDER BY created_at DESC, rowid DESC LIMIT 1) AS lastAuthorRole
     FROM support_requests ${where}
     ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'normal' THEN 2 ELSE 3 END,
       updated_at DESC LIMIT ?`).all(...parameters);
@@ -134,6 +136,31 @@ function updateSupportRequestSqlite({ requestId, status, priority, actorId, acto
   return getSupportRequestSqlite(requestId, target);
 }
 
+function deleteSupportRequestSqlite(requestId, targetDatabase) {
+  const target = activeDatabase(targetDatabase);
+  target.exec('BEGIN IMMEDIATE');
+  try {
+    target.prepare('DELETE FROM support_messages WHERE request_id = ?').run(requestId);
+    target.prepare('DELETE FROM support_events WHERE request_id = ?').run(requestId);
+    const result = target.prepare('DELETE FROM support_requests WHERE id = ?').run(requestId);
+    target.exec('COMMIT');
+    return result.changes > 0;
+  } catch (error) {
+    target.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+function purgeExpiredSupportRequestsSqlite({ cutoff }, targetDatabase) {
+  const target = activeDatabase(targetDatabase);
+  const placeholders = CLOSED_SUPPORT_STATUSES.map(() => '?').join(', ');
+  const expired = target.prepare(`SELECT id FROM support_requests
+    WHERE status IN (${placeholders}) AND closed_at IS NOT NULL AND closed_at <= ?`)
+    .all(...CLOSED_SUPPORT_STATUSES, cutoff);
+  for (const request of expired) deleteSupportRequestSqlite(request.id, target);
+  return expired.length;
+}
+
 async function createSupportRequest(input, storage) {
   storage = resolveRuntimeStore('support', storage);
   return storage?.createSupportRequest
@@ -183,12 +210,28 @@ async function updateSupportRequest(input, storage) {
     : updateSupportRequestSqlite(input, storage);
 }
 
+async function deleteSupportRequest(requestId, storage) {
+  storage = resolveRuntimeStore('support', storage);
+  return storage?.deleteSupportRequest
+    ? storage.deleteSupportRequest(requestId)
+    : deleteSupportRequestSqlite(requestId, storage);
+}
+
+async function purgeExpiredSupportRequests({ cutoff }, storage) {
+  storage = resolveRuntimeStore('support', storage);
+  return storage?.purgeExpiredSupportRequests
+    ? storage.purgeExpiredSupportRequests({ cutoff })
+    : purgeExpiredSupportRequestsSqlite({ cutoff }, storage);
+}
+
 module.exports = {
   addSupportMessage,
   countOpenSupportRequests,
   createSupportRequest,
+  deleteSupportRequest,
   getSupportConversation,
   getSupportRequest,
   listSupportRequests,
+  purgeExpiredSupportRequests,
   updateSupportRequest,
 };
