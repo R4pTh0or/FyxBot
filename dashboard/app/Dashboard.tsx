@@ -3,6 +3,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import Image from "next/image";
 import releaseManifest from "./release-manifest.json";
 import StreamingDashboard from "./StreamingDashboard";
+import FyxFlowDashboard from "./FyxFlowDashboard";
 type Option = {
     id: string;
     name: string;
@@ -70,6 +71,26 @@ type TemporaryVoiceConfig = {
     rooms?: Record<string, {
         ownerId: string;
     }>;
+};
+type FyxFlowConfig = {
+    flows: {
+        id: string;
+        name: string;
+        trigger: "member_join" | "member_leave" | "rules_accepted" | "ticket_created";
+        action: { type: "send_message"; channelId: string; message: string } | { type: "assign_role"; roleId: string };
+        active: boolean;
+        createdAt: string;
+        updatedAt: string;
+    }[];
+    history: {
+        id: string;
+        flowId: string;
+        flowName: string;
+        trigger: string;
+        status: "success" | "failed";
+        detail: string;
+        executedAt: string;
+    }[];
 };
 type Suggestion = {
     id: string;
@@ -467,11 +488,12 @@ type State = {
         birthdays: BirthdayConfig | null;
         social: SocialConfig | null;
         temporaryVoice: TemporaryVoiceConfig | null;
+        fyxFlow: FyxFlowConfig;
     };
 };
-const icons: Record<string, string> = { "Vue d’ensemble": "🏠", Pilotage: "🧭", Modération: "⚔️", Messages: "✉️", Tickets: "🎫", Règlement: "📜", Anniversaires: "🎂", Social: "📣", FyxStream: "🟣", Communauté: "🤝", Vocaux: "🔊", Accueil: "👋", Rôles: "🎭", Suggestions: "💡", Sécurité: "🛡️", Logs: "🧾", Premium: "💎", "Assistance FyxBot": "🛟", Créateur: "👑" };
+const icons: Record<string, string> = { "Vue d’ensemble": "🏠", Pilotage: "🧭", FyxFlow: "⚡", Modération: "⚔️", Messages: "✉️", Tickets: "🎫", Règlement: "📜", Anniversaires: "🎂", Social: "📣", FyxStream: "🟣", Communauté: "🤝", Vocaux: "🔊", Accueil: "👋", Rôles: "🎭", Suggestions: "💡", Sécurité: "🛡️", Logs: "🧾", Premium: "💎", "Assistance FyxBot": "🛟", Créateur: "👑" };
 const navigationGroups = [
-    { label: "Piloter", items: ["Vue d’ensemble", "Pilotage"] },
+    { label: "Piloter", items: ["Vue d’ensemble", "Pilotage", "FyxFlow"] },
     { label: "Communauté", items: ["Messages", "Tickets", "Règlement", "Anniversaires", "Social", "Communauté", "Vocaux", "Accueil", "Rôles", "Suggestions"] },
     { label: "Modération et sécurité", items: ["Modération", "Sécurité", "Logs"] },
     { label: "Administration", items: ["Premium", "Assistance FyxBot", "Créateur"] },
@@ -492,6 +514,7 @@ const FYXBOT_FAVORITES_KEY = "fyxbot:favorites";
 const SIMPLE_NAVIGATION_ITEMS = new Set([
     "Vue d’ensemble",
     "Pilotage",
+    "FyxFlow",
     "Messages",
     "Tickets",
     "Règlement",
@@ -2541,6 +2564,8 @@ export default function Dashboard({ variant = "v1" }: DashboardProps = {}) {
             return <section className="overview-panel" aria-label="État des services FyxBot"><div className="overview-head"><div><p className="eyebrow">CENTRE DE PILOTAGE</p><h2>Votre serveur en un coup d’œil</h2><p>{configuredModules}/8 modules principaux sont configurés sur {data.guild.name}.</p></div><button onClick={() => setActive("Configuration")}>Configurer le serveur</button></div><div className="health-grid"><article><span className="health-icon online">✓</span><div><strong>Bot Discord</strong><small>{data.bot.online ? "Connecté et opérationnel" : "Connexion indisponible"}</small></div></article><article><span className={`health-icon ${data.metrics.securityRules === 4 ? "online" : "warning"}`}>{data.metrics.securityRules === 4 ? "✓" : "!"}</span><div><strong>Protection AutoMod</strong><small>{data.metrics.securityRules}/4 règles actives</small></div></article><article><span className={`health-icon ${data.metrics.openTickets === 0 ? "online" : "warning"}`}>{data.metrics.openTickets}</span><div><strong>Support</strong><small>{data.metrics.openTickets === 0 ? "Aucune demande en attente" : "Ticket(s) à traiter"}</small></div></article></div><div className="quick-actions"><button onClick={() => setActive("Règlement")}><span>📜</span><strong>Publier le règlement</strong><small>Validation des membres</small></button><button onClick={() => setActive("Vocaux")}><span>🔊</span><strong>Gérer les vocaux</strong><small>Salons temporaires</small></button><button onClick={() => setActive("Social")}><span>📣</span><strong>Notifier la communauté</strong><small>Live ou nouvelle vidéo</small></button></div></section>;
         if (active === "Pilotage")
             return <PilotageDashboard data={data} form={form} update={update} runSetup={runSetup} deletePreview={deleteSetupPreview} saveNickname={saveBotNickname} rollback={rollbackChange} navigate={setActive}/>;
+        if (active === "FyxFlow")
+            return <FyxFlowDashboard apiBaseUrl={API} guildId={selectedGuild} csrfToken={csrfToken} config={data.config.fyxFlow} textChannels={data.options.textChannels} roles={data.options.assignableRoles} onNotice={setNotice} onRefresh={() => refresh(selectedGuild)}/>;
         if (active === "Premium")
             return <PremiumDashboard premium={data.premium} guildName={data.guild.name} assignableRoles={data.options.assignableRoles} form={form} update={update} activate={activateFounderAccess} configureRoles={configurePremiumMemberRoles} disableRoles={disablePremiumMemberRoles} busy={busy}/>;
         if (active === "Communauté")

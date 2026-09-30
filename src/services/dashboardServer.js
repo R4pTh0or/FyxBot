@@ -52,6 +52,14 @@ const { getRulesConfig, setRulesConfig } = require('../database/rulesStore');
 const { getBirthdayConfig, setBirthdayConfig } = require('../database/birthdayStore');
 const { getSocialConfig, setSocialConfig } = require('../database/socialStore');
 const { getTemporaryVoiceConfig } = require('../database/temporaryVoiceStore');
+const { getFyxFlowConfig } = require('../database/fyxFlowStore');
+const {
+  FyxFlowValidationError,
+  buildFyxFlowSimulation,
+  deleteFyxFlow,
+  saveFyxFlow,
+  setFyxFlowActive,
+} = require('./fyxFlow');
 const { publishRules, updateRulesMessage } = require('./rules');
 const { SUPPORTED_TIMEZONES } = require('./birthdays');
 const { socialNotificationPayload } = require('./socialNotifications');
@@ -413,6 +421,7 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
     birthdayConfig,
     socialConfig,
     temporaryVoiceConfig,
+    fyxFlowConfig,
     premiumRoleConfig,
     automodRules,
     scheduledEvents,
@@ -428,6 +437,7 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
     getBirthdayConfig(fullGuild.id),
     getSocialConfig(fullGuild.id),
     getTemporaryVoiceConfig(fullGuild.id),
+    getFyxFlowConfig(fullGuild.id),
     getPremiumRoleConfiguration(fullGuild.id),
     fullGuild.autoModerationRules.fetch().catch(() => new Map()),
     fullGuild.scheduledEvents?.fetch
@@ -468,6 +478,7 @@ async function getDashboardState(client, requestedGuildId = null, manageableGuil
     birthdays: birthdayConfig,
     social: socialConfig,
     temporaryVoice: temporaryVoiceConfig,
+    fyxFlow: fyxFlowConfig,
   };
   const securityRules = [...automodRules.values()].filter((rule) => [RULE_PREFIX, LEGACY_RULE_PREFIX]
     .some((prefix) => rule.name.startsWith(prefix)) && rule.enabled).length;
@@ -1382,6 +1393,51 @@ function startDashboardServer(client, options = {}) {
           return { id: warning.id, reason: warning.reason, createdAt: warning.createdAt, moderatorName: moderator?.displayName || 'Modérateur inconnu' };
         }));
         return send(response, 200, { warnings: result.reverse() }, origin);
+      }
+      const fyxFlowMatch = request.method === 'POST' && url.pathname.match(/^\/api\/fyxflow\/(simulate|save|activate|deactivate|delete)$/);
+      if (fyxFlowMatch) {
+        const body = await readBody(request);
+        const state = await getDashboardState(client, body.guildId, manageableGuildIds);
+        const access = await requireGuildCapability(client, state.guild.id, session, [PermissionFlagsBits.ManageGuild]);
+        const options = {
+          channelIds: new Set(state.options.textChannels.map((channel) => channel.id)),
+          roleIds: new Set(state.options.assignableRoles.map((role) => role.id)),
+        };
+        const action = fyxFlowMatch[1];
+        try {
+          if (action === 'simulate') {
+            return send(response, 200, { simulation: buildFyxFlowSimulation(body.flow, options) }, origin);
+          }
+          if (action === 'save') {
+            await saveFyxFlow(state.guild.id, body.flow, options);
+          } else if (action === 'activate') {
+            if (body.confirmation !== 'ACTIVER') throw new HttpError(400, 'Écrivez ACTIVER pour confirmer cette automatisation.');
+            const flow = state.config.fyxFlow.flows.find((item) => item.id === body.flowId);
+            if (!flow) throw new HttpError(404, 'Automatisation FyxFlow introuvable.');
+            if (flow.action?.type === 'assign_role') {
+              const role = await access.guild.roles.fetch(flow.action.roleId).catch(() => null);
+              assertAssignableRole(access.guild, role, access);
+            }
+            await setFyxFlowActive(state.guild.id, body.flowId, true, options);
+          } else if (action === 'deactivate') {
+            await setFyxFlowActive(state.guild.id, body.flowId, false, options);
+          } else if (action === 'delete') {
+            if (body.confirmation !== 'SUPPRIMER') throw new HttpError(400, 'Écrivez SUPPRIMER pour confirmer la suppression.');
+            await deleteFyxFlow(state.guild.id, body.flowId);
+          }
+        } catch (error) {
+          if (error instanceof FyxFlowValidationError) throw new HttpError(400, error.message);
+          throw error;
+        }
+        await recordChange(state.guild.id, {
+          actorId: session.user.id,
+          actorName: session.user.username,
+          kind: 'configuration',
+          title: `FyxFlow · ${action}`,
+          summary: `Une automatisation FyxFlow a été ${action === 'save' ? 'enregistrée' : action === 'activate' ? 'activée' : action === 'deactivate' ? 'désactivée' : 'supprimée'}.`,
+          details: { target: 'FyxFlow', action, flowId: body.flowId || body.flow?.id || null },
+        });
+        return send(response, 200, { ok: true, config: await getFyxFlowConfig(state.guild.id) }, origin);
       }
       const match = request.method === 'POST' && url.pathname.match(/^\/api\/config\/(logs|tickets|suggestions|welcome|birthdays|social)$/);
       if (match) {

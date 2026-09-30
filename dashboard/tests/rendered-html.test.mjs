@@ -140,7 +140,10 @@ test("conserve les protections essentielles du panel", async () => {
   assert.match(dashboard, /mobile-navigation/);
   assert.match(dashboard, /Tous les modules/);
   assert.match(dashboard, /mobilePrimaryNavigation/);
-  assert.match(dashboard, /items: \["Vue d’ensemble", "Pilotage"\]/);
+  assert.match(dashboard, /items: \["Vue d’ensemble", "Pilotage", "FyxFlow"\]/);
+  assert.match(dashboard, /FyxFlowDashboard/);
+  assert.match(server, /fyxFlowMatch = request\.method/);
+  assert.match(server, /simulate\|save\|activate\|deactivate\|delete/);
   assert.match(dashboard, /function PilotageDashboard/);
   assert.match(dashboard, /Parcours guidé/);
   assert.match(dashboard, /FYXJOURNEY · DIAGNOSTIC EXPLICABLE/);

@@ -10,6 +10,7 @@ const {
 const { getTicketConfig } = require('../database/ticketStore');
 const { logAction, sendTicketTranscript } = require('./logs');
 const logger = require('./logger').logger.child({ component: 'tickets' });
+const { executeFyxFlowTrigger } = require('./fyxFlow');
 
 const CREATE_BUTTON_ID = 'ticket:create';
 const CLOSE_BUTTON_ID = 'ticket:close';
@@ -136,6 +137,9 @@ async function createTicket(interaction) {
     title: '🎫 Ticket créé',
     description: `${interaction.user} a créé ${channel}.`,
     color: 0x57f287,
+  });
+  await executeFyxFlowTrigger(interaction.member, 'ticket_created', undefined, { channel }).catch((error) => {
+    logger.warn({ err: error, guildId: interaction.guildId, channelId: channel.id }, '[FyxBot] Déclenchement FyxFlow ignoré après la création du ticket.');
   });
   return interaction.editReply(`Votre ticket a été créé : ${channel}`);
 }

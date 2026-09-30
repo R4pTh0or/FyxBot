@@ -7,6 +7,8 @@ const {
 } = require('discord.js');
 const { getRulesConfig, setRulesConfig } = require('../database/rulesStore');
 const { assignableRoleIssue, assignableRoleMessage } = require('./safeAssignableRoles');
+const { executeFyxFlowTrigger } = require('./fyxFlow');
+const logger = require('./logger').logger.child({ component: 'rules' });
 
 const ACCEPT_RULES_BUTTON_ID = 'rules:accept';
 
@@ -103,6 +105,9 @@ async function handleRulesButton(interaction) {
   }
   await interaction.member.roles.add(role, 'Règlement FyxBot accepté');
   await interaction.reply({ content: `✅ Règlement accepté. Le rôle ${role} vous a été attribué.`, flags: MessageFlags.Ephemeral });
+  await executeFyxFlowTrigger(interaction.member, 'rules_accepted').catch((error) => {
+    logger.warn({ err: error, guildId: interaction.guildId, userId: interaction.user.id }, '[FyxBot] Déclenchement FyxFlow ignoré après l’acceptation du règlement.');
+  });
   return true;
 }
 
