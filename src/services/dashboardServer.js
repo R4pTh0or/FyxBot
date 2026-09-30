@@ -1414,8 +1414,9 @@ function startDashboardServer(client, options = {}) {
             if (body.confirmation !== 'ACTIVER') throw new HttpError(400, 'Écrivez ACTIVER pour confirmer cette automatisation.');
             const flow = state.config.fyxFlow.flows.find((item) => item.id === body.flowId);
             if (!flow) throw new HttpError(404, 'Automatisation FyxFlow introuvable.');
-            if (flow.action?.type === 'assign_role') {
-              const role = await access.guild.roles.fetch(flow.action.roleId).catch(() => null);
+            const flowActions = Array.isArray(flow.actions) && flow.actions.length > 0 ? flow.actions : [flow.action];
+            for (const flowAction of flowActions.filter((item) => item?.type === 'assign_role')) {
+              const role = await access.guild.roles.fetch(flowAction.roleId).catch(() => null);
               assertAssignableRole(access.guild, role, access);
             }
             await setFyxFlowActive(state.guild.id, body.flowId, true, options);

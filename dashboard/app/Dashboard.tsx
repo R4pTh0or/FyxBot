@@ -78,6 +78,7 @@ type FyxFlowConfig = {
         name: string;
         trigger: "member_join" | "member_leave" | "rules_accepted" | "ticket_created";
         action: { type: "send_message"; channelId: string; message: string } | { type: "assign_role"; roleId: string };
+        actions?: ({ type: "send_message"; channelId: string; message: string } | { type: "assign_role"; roleId: string })[];
         active: boolean;
         createdAt: string;
         updatedAt: string;

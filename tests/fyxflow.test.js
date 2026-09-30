@@ -64,6 +64,13 @@ test('simule les déclencheurs règlement et ticket', () => {
   }
 });
 
+test('borne un scénario à trois actions', () => {
+  const action = { type: 'send_message', channelId, message: 'Message' };
+  assert.throws(() => normalizeFlow({
+    name: 'Trop d’actions', trigger: 'member_join', actions: [action, action, action, action],
+  }, options), /maximum 3 actions/);
+});
+
 test('enregistre un brouillon désactivé et redésactive toute modification', async () => {
   const storage = memoryStorage();
   const first = await saveFyxFlow('guild-a', {
@@ -129,4 +136,59 @@ test('rend le salon du ticket dans un message FyxFlow', async () => {
   const ticketChannel = { id: '423456789012345678', isTextBased: () => true, send: async (payload) => sent.push(payload) };
   await executeFyxFlowTrigger(member, 'ticket_created', storage, { channel: ticketChannel });
   assert.equal(sent[0].content, 'Bienvenue <@323456789012345678> dans <#423456789012345678>');
+});
+
+test('exécute plusieurs actions dans leur ordre avant de journaliser', async () => {
+  const storage = memoryStorage();
+  const events = [];
+  const saved = await saveFyxFlow('guild-multi', {
+    name: 'Accueil complet', trigger: 'member_join',
+    actions: [
+      { type: 'send_message', channelId, message: 'Bonjour {membre}' },
+      { type: 'assign_role', roleId },
+    ],
+  }, options, storage);
+  await setFyxFlowActive('guild-multi', saved.flows[0].id, true, options, storage);
+  const channel = { isTextBased: () => true, send: async () => events.push('message') };
+  const role = { id: roleId, managed: false, editable: true };
+  const member = {
+    id: '323456789012345678', user: { bot: false }, roles: { add: async () => events.push('role') },
+    guild: {
+      id: 'guild-multi', name: 'Serveur test', memberCount: 20,
+      channels: { cache: new Map([[channelId, channel]]), fetch: async () => channel },
+      roles: { cache: new Map([[roleId, role]]), fetch: async () => role },
+    },
+  };
+  const result = await executeFyxFlowTrigger(member, 'member_join', storage);
+  assert.deepEqual(events, ['message', 'role']);
+  assert.equal(result[0].detail, '2 action(s) exécutée(s) avec succès.');
+});
+
+test('arrête un scénario après une action en échec et journalise le travail déjà effectué', async () => {
+  const storage = memoryStorage();
+  const events = [];
+  const saved = await saveFyxFlow('guild-failure', {
+    name: 'Accueil interrompu', trigger: 'member_join',
+    actions: [
+      { type: 'send_message', channelId, message: 'Première action' },
+      { type: 'assign_role', roleId },
+      { type: 'send_message', channelId, message: 'Ne doit pas partir' },
+    ],
+  }, options, storage);
+  await setFyxFlowActive('guild-failure', saved.flows[0].id, true, options, storage);
+  const channel = { isTextBased: () => true, send: async () => events.push('message') };
+  const role = { id: roleId, managed: false, editable: true };
+  const member = {
+    id: '323456789012345678', user: { bot: false },
+    roles: { add: async () => { events.push('role'); throw new Error('Test controlled failure'); } },
+    guild: {
+      id: 'guild-failure', name: 'Serveur test', memberCount: 20,
+      channels: { cache: new Map([[channelId, channel]]), fetch: async () => channel },
+      roles: { cache: new Map([[roleId, role]]), fetch: async () => role },
+    },
+  };
+  const result = await executeFyxFlowTrigger(member, 'member_join', storage);
+  assert.deepEqual(events, ['message', 'role']);
+  assert.equal(result[0].status, 'failed');
+  assert.match(result[0].detail, /^1 action\(s\) terminée\(s\) avant l’échec\./);
 });

@@ -227,7 +227,8 @@ Avec `GUILD_ID`, les commandes sont publiées sur le serveur de développement e
 - Effectuer un exercice réel de restauration R2 vers une destination isolée.
 - Comparer les permissions du compte connecté à celles d’un rôle isolé dans FyxVision.
 - Étendre FyxTwin avec plusieurs versions virtuelles comparables avant application.
-- Préparer FyxFlow, un constructeur d’automatisations contrôlées avec aperçu et journal d’exécution.
+- [x] Ajouter FyxFlow : modèles prêts à adapter, jusqu’à trois actions ordonnées,
+  aperçu sans effet, activation confirmée et journal d’exécution par serveur.
 - Finaliser la tarification et tester le parcours d’achat Discord de bout en bout. Les accès Fondateur et partenaire restent gratuits, séparés et sans renouvellement automatique.
 
 La liste de validation complète se trouve dans [docs/V2-READINESS.md](docs/V2-READINESS.md).

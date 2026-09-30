@@ -152,8 +152,8 @@ annonce publique.
 - [x] Étendre FyxVision à la perspective réelle d’un rôle Discord.
 - Comparer ensuite côte à côte le compte connecté et un rôle isolé.
 - Étendre FyxTwin à plusieurs versions virtuelles comparables.
-- Préparer FyxFlow, avec déclencheurs, actions, simulation et journal
-  d’exécution avant toute activation.
+- [x] Ajouter FyxFlow avec quatre modèles sûrs, jusqu’à trois actions ordonnées,
+  simulation sans effet, confirmation d’activation et journal par serveur.
 
 ## Conservé volontairement
 
