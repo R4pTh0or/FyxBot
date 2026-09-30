@@ -1,4 +1,5 @@
 const { Events, MessageFlags } = require('discord.js');
+const { performance } = require('node:perf_hooks');
 const { handleTicketButton } = require('../services/tickets');
 const { handleRoleButton } = require('../services/roleButtons');
 const { handleRulesButton } = require('../services/rules');
@@ -7,6 +8,7 @@ const { recordCommandUsage } = require('../database/commandUsageStore');
 const { GIVEAWAY_BUTTON_PREFIX, handleGiveawayButton } = require('../services/communityGiveaways');
 const { FOUNDER_CLAIM_BUTTON_ID, handlePremiumButton } = require('../services/premiumInteractions');
 const logger = require('../services/logger').logger.child({ component: 'interaction' });
+const SLOW_COMMAND_THRESHOLD_MS = 2_000;
 
 function logInteractionError(error, message, interaction, details = {}) {
   logger.error({
@@ -26,6 +28,18 @@ async function recordUsageSafely(interaction, succeeded) {
     logger.warn({ err: error, guildId: interaction.guildId, commandName: interaction.commandName },
       '[FyxBot] Statistique de commande indisponible.');
   }
+}
+
+function logSlowCommand(interaction, startedAt, now = performance.now()) {
+  const durationMs = Math.max(0, now - startedAt);
+  if (durationMs >= SLOW_COMMAND_THRESHOLD_MS) {
+    logger.warn({
+      commandName: interaction.commandName,
+      guildId: interaction.guildId,
+      durationMs: Math.round(durationMs),
+    }, '[FyxBot] Commande lente détectée.');
+  }
+  return durationMs;
 }
 
 function commandErrorMessage(error) {
@@ -159,18 +173,22 @@ module.exports = {
       return;
     }
 
+    const commandStartedAt = performance.now();
     try {
       await command.execute(interaction);
-      await recordUsageSafely(interaction, true);
       if (!preserveReply) scheduleCleanup(command.cleanupDelayMs);
+      void recordUsageSafely(interaction, true);
     } catch (error) {
-      await recordUsageSafely(interaction, false);
+      void recordUsageSafely(interaction, false);
       logInteractionError(error, '[FyxBot] Erreur pendant l’exécution d’une commande.', interaction);
       await sendCommandError(interaction, commandErrorMessage(error));
       scheduleCleanup();
+    } finally {
+      logSlowCommand(interaction, commandStartedAt);
     }
   },
 };
 
 module.exports.commandErrorMessage = commandErrorMessage;
 module.exports.sendCommandError = sendCommandError;
+module.exports.logSlowCommand = logSlowCommand;

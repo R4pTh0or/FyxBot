@@ -1,22 +1,32 @@
 const { SlashCommandBuilder } = require('discord.js');
 
+function normalizeLatency(value) {
+  return Number.isFinite(value) && value >= 0 ? Math.round(value) : null;
+}
+
+function measurePing(interaction, now = Date.now()) {
+  return {
+    interactionMs: normalizeLatency(now - interaction.createdTimestamp),
+    websocketMs: normalizeLatency(interaction.client?.ws?.ping),
+  };
+}
+
+function formatLatency(value) {
+  return value === null ? 'indisponible' : `${value} ms`;
+}
+
 module.exports = {
   data: new SlashCommandBuilder()
     .setName('ping')
     .setDescription('Affiche la latence de FyxBot.'),
 
   async execute(interaction) {
-    const reply = await interaction.reply({
-      content: 'Calcul de la latence de FyxBot…',
-      withResponse: true,
+    const latency = measurePing(interaction);
+    await interaction.reply({
+      content: `🏓 Pong ! Interaction : ${formatLatency(latency.interactionMs)} · Passerelle Discord : ${formatLatency(latency.websocketMs)}`,
     });
-    const roundTrip = reply.resource?.message
-      ? reply.resource.message.createdTimestamp - interaction.createdTimestamp
-      : null;
-    const roundTripText = roundTrip === null ? 'indisponible' : `${roundTrip} ms`;
-
-    await interaction.editReply(
-      `🏓 Pong ! Latence : ${roundTripText} · WebSocket : ${Math.round(interaction.client.ws.ping)} ms`,
-    );
   },
 };
+
+module.exports.measurePing = measurePing;
+module.exports.formatLatency = formatLatency;

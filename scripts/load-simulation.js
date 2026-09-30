@@ -24,21 +24,18 @@ function formatMs(value) {
 
 async function simulatePing(userId) {
   const startedAt = performance.now();
-  let editedReply = '';
+  let replyContent = '';
   const interaction = {
     createdTimestamp: Date.now(),
     client: { ws: { ping: 42 } },
-    async reply() {
-      return { resource: { message: { createdTimestamp: Date.now() } } };
-    },
-    async editReply(message) {
-      editedReply = message;
+    async reply(payload) {
+      replyContent = payload.content;
     },
   };
 
   try {
     await pingCommand.execute(interaction);
-    if (!editedReply.includes('Pong')) throw new Error('Réponse /ping invalide.');
+    if (!replyContent.includes('Pong')) throw new Error('Réponse /ping invalide.');
     return { userId, ok: true, durationMs: performance.now() - startedAt };
   } catch (error) {
     return { userId, ok: false, durationMs: performance.now() - startedAt, error: error.message };
