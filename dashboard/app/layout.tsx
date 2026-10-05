@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import releaseManifest from "./release-manifest.json";
 
-const siteUrl = "https://fyxbot-panel-production.up.railway.app";
+const siteUrl = "https://fyxbot.com";
 const siteTitle = "FyxBot — Bot Discord de modération, tickets et sécurité";
 const siteDescription = "FyxBot est un bot Discord français pour modérer votre communauté, gérer les tickets, renforcer la sécurité et automatiser l’accueil et les rôles.";
 

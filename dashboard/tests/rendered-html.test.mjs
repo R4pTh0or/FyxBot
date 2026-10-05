@@ -27,7 +27,10 @@ test("affiche le Control Center FyxBot côté serveur", async () => {
   assert.match(html, /<title>FyxBot — Bot Discord de modération, tickets et sécurité<\/title>/i);
   assert.match(html, /name="description" content="FyxBot est un bot Discord français/i);
   assert.match(html, /name="google-site-verification"/i);
-  assert.match(html, /rel="canonical" href="https:\/\/fyxbot-panel-production\.up\.railway\.app\/?"/i);
+  assert.match(html, /rel="canonical" href="https:\/\/fyxbot\.com\/?"/i);
+  assert.match(html, /property="og:url" content="https:\/\/fyxbot\.com\/?"/i);
+  assert.match(html, /https:\/\/fyxbot\.com\/#website/i);
+  assert.doesNotMatch(html, /fyxbot-panel-production\.up\.railway\.app/i);
   assert.match(html, /application\/ld\+json/i);
   assert.match(html, /FYXBOT/);
   assert.match(html, /CONTROL CENTER/);
@@ -105,12 +108,13 @@ test("publie les informations légales et la procédure de signalement à jour",
 });
 
 test("conserve les protections essentielles du panel", async () => {
-  const [dashboard, server, css, robots, sitemap, nextConfig, viteConfig, prerenderManifest, releaseSource, releasePublic] = await Promise.all([
+  const [dashboard, server, css, robots, sitemap, sitemapXml, nextConfig, viteConfig, prerenderManifest, releaseSource, releasePublic] = await Promise.all([
     readFile(new URL("../app/Dashboard.tsx", import.meta.url), "utf8"),
     readFile(new URL("../../src/services/dashboardServer.js", import.meta.url), "utf8"),
     readFile(new URL("../app/globals.css", import.meta.url), "utf8"),
     readFile(new URL("../public/robots.txt", import.meta.url), "utf8"),
     readFile(new URL("../public/sitemap.txt", import.meta.url), "utf8"),
+    readFile(new URL("../public/sitemap.xml", import.meta.url), "utf8"),
     readFile(new URL("../next.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../vite.config.ts", import.meta.url), "utf8"),
     readFile(new URL("../dist/server/vinext-prerender.json", import.meta.url), "utf8"),
@@ -258,10 +262,13 @@ test("conserve les protections essentielles du panel", async () => {
   assert.match(css, /@media\(max-width:650px\)/);
   assert.match(css, /mobile-nav-sheet/);
   assert.match(css, /prefers-reduced-motion:reduce/);
-  assert.match(robots, /Sitemap: https:\/\/fyxbot-panel-production\.up\.railway\.app\/sitemap\.txt/);
-  assert.match(sitemap, /^https:\/\/fyxbot-panel-production\.up\.railway\.app\/$/m);
-  assert.match(sitemap, /^https:\/\/fyxbot-panel-production\.up\.railway\.app\/support$/m);
-  assert.match(sitemap, /^https:\/\/fyxbot-panel-production\.up\.railway\.app\/changelog$/m);
+  assert.match(robots, /Sitemap: https:\/\/fyxbot\.com\/sitemap\.xml/);
+  assert.match(sitemap, /^https:\/\/fyxbot\.com\/$/m);
+  assert.match(sitemap, /^https:\/\/fyxbot\.com\/support$/m);
+  assert.match(sitemap, /^https:\/\/fyxbot\.com\/changelog$/m);
+  assert.match(sitemapXml, /<loc>https:\/\/fyxbot\.com\/<\/loc>/);
+  assert.match(sitemapXml, /<loc>https:\/\/fyxbot\.com\/support<\/loc>/);
+  assert.doesNotMatch(`${robots}\n${sitemap}\n${sitemapXml}`, /fyxbot-panel-production\.up\.railway\.app/);
   assert.match(nextConfig, /source: "\/api\/:path\*"[\s\S]*?no-store/);
   assert.match(nextConfig, /public, max-age=0, s-maxage=30, must-revalidate/);
   assert.match(nextConfig, /Last-Modified/);
