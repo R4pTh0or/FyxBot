@@ -27,6 +27,8 @@ test("affiche le Control Center FyxBot côté serveur", async () => {
   assert.match(html, /<title>FyxBot — Bot Discord de modération, tickets et sécurité<\/title>/i);
   assert.match(html, /name="description" content="FyxBot est un bot Discord français/i);
   assert.match(html, /name="google-site-verification"/i);
+  assert.match(html, /content="SMVQ3RZstwtvF5jz6W2Cj8wj0y4Ak3a6pp7SaITRF1U"/i);
+  assert.match(html, /content="wWxCAbVPlOa0Uc9ueVDq5WVVgdOHCiTxjXfOQwE5B6M"/i);
   assert.match(html, /rel="canonical" href="https:\/\/fyxbot\.com\/?"/i);
   assert.match(html, /property="og:url" content="https:\/\/fyxbot\.com\/?"/i);
   assert.match(html, /https:\/\/fyxbot\.com\/#website/i);
